@@ -1,0 +1,273 @@
+{
+  "controls": [
+    {
+      "type": "Label",
+      "name": "lblOwner",
+      "label": "$webdisplaystogether.gui.screencfg.owner",
+      "x": 0,
+      "y": 0,
+      "shadowed": true
+    },
+    {
+      "type": "Label",
+      "label": "$webdisplaystogether.gui.screencfg.friends",
+      "x": 0,
+      "y": 12
+    },
+    {
+      "type": "List",
+      "name": "lstFriends",
+      "x": 0,
+      "y": 24,
+      "width": 100,
+      "height": 130,
+      "selectionColor": "red"
+    },
+    {
+      "type": "TextField",
+      "name": "tfFriend",
+      "x": 0,
+      "y": 158,
+      "width": 76,
+      "maxLength": 128
+    },
+    {
+      "type": "Button",
+      "name": "btnAdd",
+      "x": 80,
+      "y": 159,
+      "width": 20,
+      "label": "+"
+    },
+    {
+      "type": "Label",
+      "x": 0,
+      "y": 186,
+      "label": "$webdisplaystogether.gui.screencfg.browsemode"
+    },
+    {
+      "type": "ComboBox",
+      "name": "cbBrowseMode",
+      "x": 0,
+      "y": 198,
+      "width": 62,
+      "height": 14,
+      "options": [
+        "$webdisplaystogether.gui.screencfg.mode.server",
+        "$webdisplaystogether.gui.screencfg.mode.local"
+      ]
+    },
+    {
+      "type": "Button",
+      "name": "btnApplyMode",
+      "x": 66,
+      "y": 195,
+      "width": 34,
+      "label": "$webdisplaystogether.gui.screencfg.apply"
+    },
+    {
+      "type": "Label",
+      "x": 104,
+      "y": 12,
+      "label": "$webdisplaystogether.gui.screencfg.permissions"
+    },
+    {
+      "type": "ControlGroup",
+      "name": "grpFriends",
+      "x": 104,
+      "y": 24,
+      "label": "$webdisplaystogether.gui.screencfg.friends",
+      "width": 150,
+      "height": 112,
+      "childs": [
+        {
+          "type": "CheckBox",
+          "name": "boxFSetUrl",
+          "x": 0,
+          "y": 0,
+          "label": "$webdisplaystogether.gui.screencfg.seturl"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxFClick",
+          "x": 0,
+          "y": 16,
+          "label": "$webdisplaystogether.gui.screencfg.click"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxFFriends",
+          "x": 0,
+          "y": 32,
+          "label": "$webdisplaystogether.gui.screencfg.friendlist"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxFOthers",
+          "x": 0,
+          "y": 48,
+          "label": "$webdisplaystogether.gui.screencfg.otherrights"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxFDevices",
+          "x": 0,
+          "y": 64,
+          "label": "$webdisplaystogether.gui.screencfg.binddev"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxFResolution",
+          "x": 0,
+          "y": 80,
+          "label": "$webdisplaystogether.gui.screencfg.mres"
+        }
+      ]
+    },
+    {
+      "type": "ControlGroup",
+      "name": "grpOthers",
+      "x": 104,
+      "y": 140,
+      "label": "$webdisplaystogether.gui.screencfg.others",
+      "width": 150,
+      "height": 80,
+      "childs": [
+        {
+          "type": "CheckBox",
+          "name": "boxOSetUrl",
+          "x": 0,
+          "y": 0,
+          "label": "$webdisplaystogether.gui.screencfg.seturl"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxOClick",
+          "x": 0,
+          "y": 16,
+          "label": "$webdisplaystogether.gui.screencfg.click"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxODevices",
+          "x": 0,
+          "y": 32,
+          "label": "$webdisplaystogether.gui.screencfg.binddev"
+        },
+        {
+          "type": "CheckBox",
+          "name": "boxOResolution",
+          "x": 0,
+          "y": 48,
+          "label": "$webdisplaystogether.gui.screencfg.mres"
+        }
+      ]
+    },
+    {
+      "type": "Label",
+      "x": 258,
+      "y": 12,
+      "label": "$webdisplaystogether.gui.screencfg.resolution"
+    },
+    {
+      "type": "TextField",
+      "name": "tfResX",
+      "x": 260,
+      "y": 24,
+      "width": 40,
+      "maxLength": 4
+    },
+    {
+      "type": "TextField",
+      "name": "tfResY",
+      "x": 304,
+      "y": 24,
+      "width": 40,
+      "maxLength": 4
+    },
+    {
+      "type": "Button",
+      "name": "btnSetRes",
+      "x": 260,
+      "y": 48,
+      "width": 84,
+      "label": "$webdisplaystogether.gui.screencfg.setres",
+      "disabled": true
+    },
+    {
+      "type": "CheckBox",
+      "name": "cbLockRatio",
+      "x": 257,
+      "y": 69,
+      "label": "$webdisplaystogether.gui.screencfg.lockratio",
+      "checked": true
+    },
+    {
+      "type": "Label",
+      "x": 258,
+      "y": 87,
+      "label": "$webdisplaystogether.gui.screencfg.rotation"
+    },
+    {
+      "type": "Button",
+      "name": "btnChangeRot",
+      "x": 260,
+      "y": 99,
+      "width": 84
+    },
+    {
+      "type": "CheckBox",
+      "name": "cbAutoVolume",
+      "x": 257,
+      "y": 120,
+      "label": "$webdisplaystogether.gui.screencfg.autovol",
+      "tooltip": "$webdisplaystogether.gui.screencfg.avwarning"
+    },
+    {
+      "type": "Slider",
+      "name": "sldBrightness",
+      "x": 257,
+      "y": 138,
+      "width": 88,
+      "height": 14,
+      "min": 0,
+      "max": 300,
+      "value": 100,
+      "label": "$webdisplaystogether.gui.screencfg.brightness",
+      "suffix": "%"
+    },
+    {
+      "type": "Slider",
+      "name": "sldVolume",
+      "x": 257,
+      "y": 156,
+      "width": 88,
+      "height": 14,
+      "min": 0,
+      "max": 300,
+      "value": 100,
+      "label": "$webdisplaystogether.gui.screencfg.volume",
+      "suffix": "%"
+    },
+    {
+      "type": "Label",
+      "x": 258,
+      "y": 176,
+      "label": "$webdisplaystogether.gui.screencfg.soundmode"
+    },
+    {
+      "type": "ComboBox",
+      "name": "cbSoundMode",
+      "x": 257,
+      "y": 188,
+      "width": 88,
+      "height": 14,
+      "options": [
+        "$webdisplaystogether.gui.screencfg.sound.screen",
+        "$webdisplaystogether.gui.screencfg.sound.speakers",
+        "$webdisplaystogether.gui.screencfg.sound.direct"
+      ]
+    }
+  ],
+  "center": true
+}

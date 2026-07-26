@@ -1,0 +1,10 @@
+{
+  "replace": false,
+  "values": [
+    "webdisplaystogether:screen",
+    "webdisplaystogether:kb_left",
+    "webdisplaystogether:kb_right",
+    "webdisplaystogether:rctrl",
+    "webdisplaystogether:speaker"
+  ]
+}

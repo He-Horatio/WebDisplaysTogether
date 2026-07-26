@@ -1,0 +1,8 @@
+{
+  "parent": "block/orientable",
+  "textures": {
+    "top": "webdisplaystogether:block/oci_topbot",
+    "front": "webdisplaystogether:block/oci_front",
+    "side": "webdisplaystogether:block/oci_side"
+  }
+}

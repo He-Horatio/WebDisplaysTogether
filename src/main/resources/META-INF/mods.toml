@@ -1,0 +1,50 @@
+modLoader="javafml" #mandatory
+
+loaderVersion="[43,)" #mandatory This is typically bumped every Minecraft version by Forge. See our download page for lists of versions.
+
+license="MIT"
+
+issueTrackerURL="" #optional
+
+[[mods]] #mandatory
+
+modId="webdisplaystogether" #mandatory
+
+version="1.0" #mandatory
+
+displayName="WebDisplaysTogether" #mandatory
+
+displayURL="" #optional
+
+logoFile= "" #optional
+
+credits="Inspired by WebDisplays by montoyo (https://github.com/montoyo/webdisplays), maintained by the CinemaMod Group" #optional
+
+authors="Horatio" #optional
+
+description='''
+Web browser screens rendered on the SERVER and streamed to every player as video (VP8/VP9 + Opus): everyone sees the exact same page, shared logins, synchronized playback.
+
+服务器端统一渲染的网页屏幕：网页在服务器上用 Chromium 渲染，编码成视频流推送给所有玩家。所有人看到完全相同的画面，登录状态全服共享，播放进度同步。
+'''
+
+[[dependencies.webdisplaystogether]] #optional
+modId="forge" #mandatory
+mandatory=true #mandatory
+versionRange="[43,)" #mandatory
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.webdisplaystogether]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.webdisplaystogether]]
+modId="mcef"
+mandatory=true
+versionRange="[2.0.0+1.20.1, )"
+ordering="NONE"
+side="BOTH"

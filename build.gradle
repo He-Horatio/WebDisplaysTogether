@@ -1,0 +1,177 @@
+plugins {
+    id 'eclipse'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'org.spongepowered.mixin' version '0.7.+'
+    id 'org.parchmentmc.librarian.forgegradle' version '1.+'
+}
+apply plugin: 'org.spongepowered.mixin'
+
+println('Java: ' + System.getProperty('java.version') + ' JVM: ' + System.getProperty('java.vm.version') + '(' + System.getProperty('java.vendor') + ') Arch: ' + System.getProperty('os.arch'))
+
+version = mod_version
+group = maven_group // http://maven.apache.org/guides/mini/guide-naming-conventions.html
+archivesBaseName = archives_base_name
+
+// set java version
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+// required for making a functional mod
+sourceSets.main.resources.srcDirs += 'src/generated/resources'
+mixin.add sourceSets.main, "webdisplaystogether.refmap.json"
+
+// neoforge gradle
+minecraft {
+    mappings channel: 'parchment', version: '2023.06.26-1.20.1'
+
+    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+
+    copyIdeResources = true
+
+    runs {
+        client {
+            properties 'mixin.env.remapRefMap': 'true'
+            property 'mixin.env.refMapRemappingFile', "${project.projectDir}/build/createSrgToMcp/output.srg"
+            workingDirectory project.file('run')
+            arg "-mixin.config=webdisplaystogether.mixins.json"
+            property 'forge.logging.console.level', 'debug'
+
+            // e.g. gradlew runClient -PquickPlay=localhost:25565 to join a server directly
+            if (project.hasProperty('quickPlay')) {
+                args '--quickPlayMultiplayer', project.property('quickPlay')
+            }
+            if (project.hasProperty('streamDebug')) {
+                jvmArg '-Dwdt.streamDebug=true'
+            }
+
+            mods {
+                webdisplaystogether {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        server {
+            properties 'mixin.env.remapRefMap': 'true'
+            property 'mixin.env.refMapRemappingFile', "${project.projectDir}/build/createSrgToMcp/output.srg"
+            workingDirectory project.file('run')
+            arg "-mixin.config=webdisplaystogether.mixins.json"
+
+
+            property 'forge.logging.console.level', 'debug'
+
+            mods {
+                webdisplaystogether {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        data {
+            workingDirectory project.file('run')
+            properties 'mixin.env.remapRefMap': 'true'
+            property 'mixin.env.refMapRemappingFile', "${project.projectDir}/build/createSrgToMcp/output.srg"
+            property 'forge.logging.console.level', 'debug'
+            args '--mod', 'webdisplaystogether', '--all', '--output', file('src/generated/resources/'), '--existing', sourceSets.main.resources.srcDirs[0]
+            mods {
+                webdisplaystogether {
+                    source sourceSets.main
+                }
+            }
+        }
+    }
+}
+
+repositories{
+    maven {
+        name = "cursemaven"
+        url = "https://www.cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+    maven {
+        url 'https://mcef-download.cinemamod.com/repositories/releases/'
+        content {
+            includeGroup "com.cinemamod"
+        }
+    }
+    mavenCentral()
+}
+
+ext {
+    javacppVersion = '1.5.9'
+    ffmpegVersion = '6.0-1.5.9'
+    // Platforms we bundle natives for. Add 'macosx-x86_64' / 'macosx-arm64' if needed.
+    nativePlatforms = ['windows-x86_64', 'linux-x86_64']
+}
+
+// bytedeco ffmpeg (VP8 encode/decode) gets merged straight into the mod jar,
+// classes + native libraries, so the JavaCPP loader can find everything.
+// minecraftLibrary (rather than implementation) also puts the classes on the
+// game layer in dev runs; otherwise runClient/runServer fail with
+// NoClassDefFoundError: org/bytedeco/javacpp/Pointer.
+configurations {
+    shadeFfmpeg
+    minecraftLibrary.extendsFrom shadeFfmpeg
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.2.0'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    // useful for debugging performance problems
+    implementation fg.deobf("curse.maven:spark-361579:4381167")
+    // here because we need to manually open the VR keyboard
+    compileOnly fg.deobf("curse.maven:vivecraft-667903:4794431")
+
+    implementation fg.deobf("com.cinemamod:mcef-forge:2.1.1-1.20.1") {
+        transitive = false
+    }
+
+    // VP8 video pipeline (server-side encode / client-side decode)
+    shadeFfmpeg "org.bytedeco:javacpp:${javacppVersion}"
+    shadeFfmpeg "org.bytedeco:ffmpeg:${ffmpegVersion}"
+    nativePlatforms.each { plat ->
+        shadeFfmpeg "org.bytedeco:javacpp:${javacppVersion}:${plat}"
+        shadeFfmpeg "org.bytedeco:ffmpeg:${ffmpegVersion}:${plat}"
+    }
+}
+
+// merge the bytedeco jars (classes + natives) into the final mod jar
+tasks.named('jar') {
+    from(provider { configurations.shadeFfmpeg.collect { it.isDirectory() ? it : zipTree(it) } }) {
+        exclude 'META-INF/MANIFEST.MF'
+        exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+        exclude 'META-INF/maven/**', 'META-INF/versions/**'
+        exclude 'module-info.class'
+
+        // The mod only uses avutil + swresample + avcodec + swscale (see
+        // WebDisplays.preloadFfmpeg and net.montoyo.wd.video/audio). Drop the
+        // FFmpeg modules and tools it never touches - roughly 13 MB of the
+        // final jar (avformat, avfilter, avdevice, postproc and the ffmpeg/
+        // ffprobe command line executables, per bundled platform).
+        exclude 'org/bytedeco/ffmpeg/**/avformat*', 'org/bytedeco/ffmpeg/**/libavformat*', 'org/bytedeco/ffmpeg/**/jniavformat*', 'org/bytedeco/ffmpeg/**/libjniavformat*'
+        exclude 'org/bytedeco/ffmpeg/**/avfilter*', 'org/bytedeco/ffmpeg/**/libavfilter*', 'org/bytedeco/ffmpeg/**/jniavfilter*', 'org/bytedeco/ffmpeg/**/libjniavfilter*'
+        exclude 'org/bytedeco/ffmpeg/**/avdevice*', 'org/bytedeco/ffmpeg/**/libavdevice*', 'org/bytedeco/ffmpeg/**/jniavdevice*', 'org/bytedeco/ffmpeg/**/libjniavdevice*'
+        exclude 'org/bytedeco/ffmpeg/**/postproc*', 'org/bytedeco/ffmpeg/**/libpostproc*', 'org/bytedeco/ffmpeg/**/jnipostproc*', 'org/bytedeco/ffmpeg/**/libjnipostproc*'
+        exclude 'org/bytedeco/ffmpeg/**/ffmpeg', 'org/bytedeco/ffmpeg/**/ffmpeg.exe', 'org/bytedeco/ffmpeg/**/ffprobe', 'org/bytedeco/ffmpeg/**/ffprobe.exe'
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// jar meta-info
+jar {
+    manifest {
+        attributes([
+                "Specification-Title": "WebDisplaysTogether",
+                "Specification-Vendor": "Horatio",
+                "Specification-Version": "1", // We are version 1 of ourselves
+                "Implementation-Title": project.name,
+                "Implementation-Version": project.version,
+                "Implementation-Vendor": "Horatio",
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+                "MixinConfigs": "webdisplaystogether.mixins.json"
+        ])
+    }
+}

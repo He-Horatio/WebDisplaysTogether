@@ -1,0 +1,21 @@
+{
+  "display": {
+    "icon": { "item": "webdisplaystogether:minepad" },
+    "title": { "translate": "advancements.webdisplaystogether.padbreak.title" },
+    "description": { "translate": "advancements.webdisplaystogether.padbreak.description" },
+    "frame": "task"
+  },
+  "parent": "webdisplaystogether:root",
+  "criteria": {
+    "pad_break": {
+      "trigger": "webdisplaystogether:pad_break"
+    }
+  },
+  "rewards": {
+    "recipes": [
+      "webdisplaystogether:extcard",
+      "webdisplaystogether:laserdiode",
+      "webdisplaystogether:laserpointer"
+    ]
+  }
+}

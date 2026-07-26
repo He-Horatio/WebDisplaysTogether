@@ -1,0 +1,14 @@
+{
+  "display": {
+    "icon": { "item": "webdisplaystogether:linker" },
+    "title": { "translate": "advancements.webdisplaystogether.linkperipheral.title" },
+    "description": { "translate": "advancements.webdisplaystogether.linkperipheral.description" },
+    "frame": "task"
+  },
+  "parent": "webdisplaystogether:screen",
+  "criteria": {
+    "link_peripheral": {
+      "trigger": "webdisplaystogether:link_peripheral"
+    }
+  }
+}

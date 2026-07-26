@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "KKK",
+    "KPK",
+    "KKK"
+  ],
+  "key": {
+    "K": {
+      "item": "webdisplaystogether:craftcomp_stonekey",
+      "data": 0
+    },
+    "P": {
+      "item": "webdisplaystogether:craftcomp_peripheral",
+      "data": 2
+    }
+  },
+  "result": {
+    "item": "webdisplaystogether:keyboard",
+    "data": 0,
+    "count": 1
+  }
+}

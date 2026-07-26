@@ -1,0 +1,10 @@
+{
+  "forge_marker": 1,
+  "uvlock": false,
+	"variants": {
+        "facing=north": { "model": "webdisplaystogether:block/kb_right"             },
+        "facing=east": { "model": "webdisplaystogether:block/kb_right", "y": 90.0  },
+        "facing=south": { "model": "webdisplaystogether:block/kb_right", "y": 180.0 },
+        "facing=west": { "model": "webdisplaystogether:block/kb_right", "y": 270.0 }
+    }
+}

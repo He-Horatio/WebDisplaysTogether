@@ -1,0 +1,28 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven {
+            name = 'MinecraftForge'
+            url = 'https://maven.minecraftforge.net/'
+        }
+        maven { url = 'https://maven.parchmentmc.org' } // Add this line
+    }
+//    resolutionStrategy {
+//        eachPlugin {
+//            switch (requested.id.toString()) {
+//                case "net.minecraftforge.gradle": {
+//                    useModule("${requested.id}:ForgeGradle:${requested.version}")
+//                    break
+//                }
+//                case "org.spongepowered.mixin": {
+//                    useModule("org.spongepowered:mixingradle:${requested.version}")
+//                    break;
+//                }
+//            }
+//        }
+//    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.5.0'
+}
