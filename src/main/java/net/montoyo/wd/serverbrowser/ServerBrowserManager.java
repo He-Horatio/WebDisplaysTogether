@@ -250,6 +250,10 @@ public final class ServerBrowserManager {
             return;
         }
 
+        // Keep the stream's own URL current too, so crash recovery reopens
+        // the page the viewers were actually on, not the original one.
+        ss.noteUrl(url);
+
         scr.url = url;
         scr.videoType = VideoType.getTypeFromURL(url);
         tes.setChanged();
@@ -281,6 +285,9 @@ public final class ServerBrowserManager {
 
             // Retry browser creation (CEF may not have been ready yet)
             ss.ensureBrowser();
+
+            // Detect dead/hung render processes and recreate their browser
+            ss.checkBrowserHealth(now);
 
             // Prune stale subscribers
             for (Map.Entry<UUID, StreamedScreen.Subscriber> sub : ss.subscribers().entrySet()) {

@@ -49,6 +49,7 @@ public final class ServerCefManager {
 
     private static final AtomicBoolean startedInit = new AtomicBoolean(false);
     private static final AtomicBoolean popupRedirectInstalled = new AtomicBoolean(false);
+    private static final AtomicBoolean crashRecoveryInstalled = new AtomicBoolean(false);
     private static volatile boolean ready = false;
     private static volatile boolean failed = false;
 
@@ -161,6 +162,37 @@ public final class ServerCefManager {
             client.addLoadHandler(patcher);
         else
             MCEF.getClient().addLoadHandler(patcher); // raw client already has MCEF's multiplexer registered
+    }
+
+    /**
+     * Automatic recovery from render process crashes. Chromium render
+     * processes do die on long-running heavy pages (usually OOM); without
+     * this handler the CefBrowser object lives on, silently swallowing input
+     * and never painting again - the screen freezes and stops reacting to
+     * the mouse until a player rebuilds it. Reloading recreates the render
+     * process (cookies/logins survive: they live in the browser process).
+     *
+     * Installed once per JVM on the raw CefClient. The findByBrowser check
+     * limits the reaction to screen browsers; for everything else (e.g.
+     * minepads on the shared integrated-server client) the adapter defaults
+     * match having no request handler at all.
+     */
+    public static void installCrashRecovery(CefClient client) {
+        if (client == null || !crashRecoveryInstalled.compareAndSet(false, true))
+            return;
+
+        client.addRequestHandler(new org.cef.handler.CefRequestHandlerAdapter() {
+            @Override
+            public void onRenderProcessTerminated(org.cef.browser.CefBrowser browser,
+                                                  org.cef.handler.CefRequestHandler.TerminationStatus status) {
+                StreamedScreen ss = ServerBrowserManager.findByBrowser(browser);
+                if (ss != null)
+                    ss.onRenderProcessDead(status != null ? status.name() : "unknown");
+                else
+                    Log.warning("A render process died (%s) for a browser not owned by any screen.",
+                            status != null ? status.name() : "unknown");
+            }
+        });
     }
 
     /**
@@ -970,6 +1002,9 @@ public final class ServerCefManager {
         // target="_blank" links must navigate the same view instead of opening
         // an (invisible) popup window
         installPopupRedirect(cefClient);
+
+        // Auto-reload screens whose render process crashes
+        installCrashRecovery(cefClient);
 
         // Keep ScreenData.url in sync when pages navigate (link clicks etc.)
         cefClient.addDisplayHandler(new org.cef.handler.CefDisplayHandlerAdapter() {

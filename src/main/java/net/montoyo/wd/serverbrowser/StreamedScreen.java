@@ -64,6 +64,24 @@ public final class StreamedScreen {
     volatile long lastViewerTime = System.currentTimeMillis();
     private boolean firstFrameLogged = false; // encoder thread only
 
+    // Browser liveness watchdog. Chromium render processes do die after hours
+    // of uptime (OOM on heavy pages is the usual culprit); the CefBrowser
+    // object survives and silently swallows injected input, so without this
+    // the screen freezes on its last frame and ignores the mouse until the
+    // screen is rebuilt by hand.
+    private volatile long browserCreatedMs = 0;
+    private volatile long lastInputMs = 0;
+    private long probeSentMs = 0;    // server thread only
+    private long lastRecoveryMs = 0; // server thread only
+    /** Input with no paint after this long means the page ignored a click - suspicious. */
+    private static final long INPUT_SILENCE_MS = 6_000;
+    /** With viewers present, even static pages should answer a probe this often. */
+    private static final long IDLE_PROBE_MS = 60_000;
+    /** A live renderer answers an invalidate() with a paint well within this. */
+    private static final long PROBE_TIMEOUT_MS = 8_000;
+    /** Cooldown between browser recreations so a persistently broken page cannot loop. */
+    private static final long RECOVERY_COOLDOWN_MS = 30_000;
+
     private volatile ScheduledFuture<?> encodeTask;
     private volatile boolean encodeStarted = false;
     private volatile boolean encodeBroken = false;
@@ -170,11 +188,16 @@ public final class StreamedScreen {
                 // (target=_blank) redirection is installed there too.
                 ServerCefManager.installPopupRedirect(client);
 
+                // Recreated browsers must recover automatically too
+                ServerCefManager.installCrashRecovery(client);
+
                 ServerScreenBrowser b = new ServerScreenBrowser(client, url, browserW, browserH,
                         ServerCefManager.createRequestContext());
                 b.setCloseAllowed();
                 b.createImmediately();
                 browser = b;
+                browserCreatedMs = System.currentTimeMillis();
+                lastInputMs = 0;
                 keyframeNeeded = true;
                 Log.info("Created server-side browser for screen %s (%dx%d)", key, browserW, browserH);
 
@@ -375,6 +398,103 @@ public final class StreamedScreen {
         keyframeNeeded = true;
     }
 
+    // ------------------------------------------------------------------
+    // Browser liveness / crash recovery
+    // ------------------------------------------------------------------
+
+    /**
+     * Called (from the CEF thread) when Chromium reports this screen's render
+     * process gone. Reload recreates the render process while keeping the
+     * browser and its request context (cookies/logins survive); if that does
+     * not bring paints back, the watchdog below falls back to a full recreate.
+     */
+    void onRenderProcessDead(String status) {
+        ServerScreenBrowser b = browser;
+        if (closed || b == null)
+            return;
+
+        Log.warning("Screen %s: the browser render process died (%s); reloading the page", key, status);
+        lastInputMs = 0;
+        keyframeNeeded = true;
+        ServerCefManager.submit(() -> {
+            try {
+                b.reload();
+            } catch (Throwable t) {
+                Log.warningEx("Screen " + key + ": reload after render process death failed", t);
+            }
+        });
+    }
+
+    /**
+     * Periodic health check (server thread, every ~2s from the manager tick).
+     *
+     * A dead render process is invisible from the outside: the browser object
+     * keeps accepting input and simply never paints again. So whenever paints
+     * stop under circumstances where a live renderer would paint - right after
+     * player input, or at all for a minute with viewers present - ask CEF to
+     * repaint the view (a live renderer always answers within milliseconds,
+     * static page or not). No answer means the renderer is dead or hung:
+     * recreate the browser at the current URL.
+     */
+    void checkBrowserHealth(long now) {
+        ServerScreenBrowser b = browser;
+        if (closed || b == null || !hasSubscribers() || browserCreatedMs == 0) {
+            probeSentMs = 0;
+            return;
+        }
+
+        long lastPaint = Math.max(b.getLastPaintMs(), browserCreatedMs);
+
+        if (probeSentMs == 0) {
+            long input = lastInputMs;
+            boolean inputIgnored = input != 0 && input > lastPaint && now - input >= INPUT_SILENCE_MS;
+            boolean longSilence = now - lastPaint >= IDLE_PROBE_MS;
+            if (inputIgnored || longSilence) {
+                probeSentMs = now;
+                ServerCefManager.submit(() -> {
+                    try {
+                        b.requestRepaint();
+                    } catch (Throwable ignored) {
+                    }
+                });
+            }
+            return;
+        }
+
+        if (b.getLastPaintMs() >= probeSentMs) {
+            probeSentMs = 0; // probe answered: the renderer is alive
+            return;
+        }
+
+        if (now - probeSentMs >= PROBE_TIMEOUT_MS) {
+            probeSentMs = 0;
+            if (now - lastRecoveryMs >= RECOVERY_COOLDOWN_MS) {
+                lastRecoveryMs = now;
+                Log.warning("Screen %s: the browser stopped painting and ignored a repaint probe "
+                        + "(render process dead or hung); recreating the browser at %s", key, url);
+                recreateBrowser();
+            }
+        }
+    }
+
+    /** Closes the (broken) browser and creates a fresh one at the current URL. */
+    private void recreateBrowser() {
+        ServerScreenBrowser old = browser;
+        browser = null;
+        browserRequested = false;
+        browserCreatedMs = 0;
+        lastInputMs = 0;
+        keyframeNeeded = true;
+        if (old != null)
+            ServerCefManager.submit(old::closeBrowser);
+        ensureBrowser();
+    }
+
+    /** Keeps {@link #url} tracking in-browser navigation so recovery reloads the page the viewers were on. */
+    void noteUrl(String url) {
+        this.url = url;
+    }
+
     /**
      * Delivery report from one viewer (server thread). Multiplicative
      * decrease on trouble, slow additive-ish recovery after a sustained
@@ -451,6 +571,9 @@ public final class StreamedScreen {
         final int lastX = lastMousePos.x;
         final int lastY = lastMousePos.y;
 
+        if (event != ClickControl.ControlType.MOVE)
+            lastInputMs = System.currentTimeMillis();
+
         ServerCefManager.submit(() -> {
             if (event == ClickControl.ControlType.CLICK) {
                 b.sendMouseMove(vec.x, vec.y);
@@ -482,6 +605,7 @@ public final class StreamedScreen {
         if (b == null)
             return;
 
+        lastInputMs = System.currentTimeMillis();
         ServerCefManager.submit(() -> {
             try {
                 if (text.startsWith("t")) {

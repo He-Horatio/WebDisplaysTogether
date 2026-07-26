@@ -24,6 +24,7 @@ public class ServerScreenBrowser extends CefBrowserOsr {
     private ByteBuffer frame; // full BGRA frame, tightly packed
     private int frameWidth, frameHeight;
     private long frameCounter;
+    private volatile long lastPaintMs; // wall clock of the last onPaint, for liveness checks
     private int btnMask = 0;
 
     // GLFW_PRESS / GLFW_RELEASE values; literals so the dedicated server never touches LWJGL
@@ -55,6 +56,22 @@ public class ServerScreenBrowser extends CefBrowserOsr {
             frame.flip();
             frameCounter++;
         }
+        lastPaintMs = System.currentTimeMillis();
+    }
+
+    /** Wall-clock time of the last paint delivered by the render process (0 if none yet). */
+    public long getLastPaintMs() {
+        return lastPaintMs;
+    }
+
+    /**
+     * Asks CEF to repaint the whole view. A live render process answers with an
+     * onPaint within milliseconds (even for fully static pages), so this doubles
+     * as a cheap liveness probe: no paint after this call means the render
+     * process is dead or hung.
+     */
+    public void requestRepaint() {
+        invalidate();
     }
 
     /** Monotonic counter incremented for every painted frame. */
