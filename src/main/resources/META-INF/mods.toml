@@ -4,7 +4,7 @@ loaderVersion="[43,)" #mandatory This is typically bumped every Minecraft versio
 
 license="MIT"
 
-issueTrackerURL="" #optional
+issueTrackerURL="https://github.com/He-Horatio/WebDisplaysTogether/issues" #optional
 
 [[mods]] #mandatory
 
@@ -14,7 +14,7 @@ version="1.0" #mandatory
 
 displayName="WebDisplaysTogether" #mandatory
 
-displayURL="" #optional
+displayURL="https://github.com/He-Horatio/WebDisplaysTogether" #optional
 
 logoFile= "" #optional
 
