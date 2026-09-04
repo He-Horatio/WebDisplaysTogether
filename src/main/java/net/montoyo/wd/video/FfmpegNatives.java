@@ -12,6 +12,8 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -50,17 +52,26 @@ public final class FfmpegNatives {
             System.setProperty("org.bytedeco.javacpp.platform.preloadpath", outDir.toString());
 
             int extracted = 0, present = 0;
+            Set<String> bundledPlatforms = new TreeSet<>();
             for (Path archive : findSourceArchives(platform)) {
                 try (ZipFile zip = new ZipFile(archive.toFile())) {
                     Enumeration<? extends ZipEntry> entries = zip.entries();
                     while (entries.hasMoreElements()) {
                         ZipEntry entry = entries.nextElement();
                         String name = entry.getName();
-                        if (entry.isDirectory() || !name.startsWith("org/bytedeco/") || !name.contains("/" + platform + "/"))
+                        if (entry.isDirectory() || !name.startsWith("org/bytedeco/"))
                             continue;
 
                         String fileName = name.substring(name.lastIndexOf('/') + 1);
                         if (!fileName.endsWith(".dll") && !fileName.contains(".so") && !fileName.endsWith(".dylib"))
+                            continue;
+
+                        // org/bytedeco/<module>/<platform>/<library>
+                        String[] parts = name.split("/");
+                        if (parts.length >= 5)
+                            bundledPlatforms.add(parts[3]);
+
+                        if (!name.contains("/" + platform + "/"))
                             continue;
 
                         Path target = outDir.resolve(fileName);
@@ -92,7 +103,17 @@ public final class FfmpegNatives {
             }
 
             if (extracted + present == 0) {
-                Log.warning("Could not find the bundled FFmpeg natives for %s; falling back to JavaCPP's own extraction.", platform);
+                if (bundledPlatforms.isEmpty()) {
+                    // Nothing was scanned at all - most likely a dev run where the
+                    // bytedeco jars are elsewhere on the classpath. Let JavaCPP try.
+                    Log.warning("Could not find the bundled FFmpeg natives for %s; falling back to JavaCPP's own extraction.", platform);
+                } else {
+                    // The natives are there, just not for this machine. Nothing
+                    // downstream can recover from that, so say so plainly.
+                    Log.error("This build of WebDisplaysTogether bundles the FFmpeg codecs for %s only, but this "
+                            + "machine is %s. Screens cannot be encoded and will stay black; run the server on a "
+                            + "supported architecture.", String.join(", ", bundledPlatforms), platform);
+                }
                 return;
             }
 

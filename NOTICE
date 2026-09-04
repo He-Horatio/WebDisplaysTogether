@@ -25,8 +25,8 @@ mod jar (and in the licenses/ directory of the source repository).
     License: GNU Lesser General Public License, version 2.1 or later
     Text:    META-INF/licenses/ffmpeg-COPYING.LGPLv2.1.txt
 
-    The mod jar contains prebuilt FFmpeg shared libraries for windows-x86_64
-    and linux-x86_64:
+    The mod jar contains prebuilt FFmpeg shared libraries for windows-x86_64,
+    linux-x86_64 and linux-arm64:
 
         avcodec, avutil, swresample, swscale
         (plus the matching JavaCPP JNI bridge libraries)
@@ -58,7 +58,8 @@ mod jar (and in the licenses/ directory of the source repository).
     Text:    META-INF/licenses/javacpp-LICENSE-Apache-2.0.txt
 
     Provides the Java <-> native bridge used to call FFmpeg. The mod jar
-    contains its JNI libraries for windows-x86_64 and linux-x86_64.
+    contains its JNI libraries for windows-x86_64, linux-x86_64 and
+    linux-arm64.
 
     The Windows build of JavaCPP additionally ships the Microsoft Visual C++
     runtime redistributable libraries that its native code links against

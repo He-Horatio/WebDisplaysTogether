@@ -31,7 +31,7 @@ Fabric 1.21.1 and NeoForge 1.21.1; all three are feature-identical.
 | Loader | Forge 47.2.0 or newer |
 | Java | 17 |
 | Required mod | [MCEF](https://www.curseforge.com/minecraft/mc-mods/mcef) 2.1.1+ (client **and** server) |
-| Platforms | Windows x64, Linux x64 (no macOS build yet) |
+| Platforms | Windows x64, Linux x64, Linux arm64 (no macOS build yet) |
 
 A dedicated Linux server also needs the usual Chromium runtime libraries
 (`libnss3`, `libatk1.0-0`, `libgbm1`, ...) and either an X server or `Xvfb`,
@@ -66,7 +66,8 @@ MCEF runtime.
 ```
 
 The jar lands in `build/libs/`. The build merges the bytedeco JavaCPP + FFmpeg
-classes and natives for `windows-x86_64` and `linux-x86_64` into the mod jar,
+classes and natives for `windows-x86_64`, `linux-x86_64` and `linux-arm64`
+into the mod jar,
 and copies `LICENSE`, `NOTICE` and `licenses/` into `META-INF/`.
 
 Useful flags:

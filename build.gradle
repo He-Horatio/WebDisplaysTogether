@@ -107,7 +107,8 @@ ext {
     javacppVersion = '1.5.9'
     ffmpegVersion = '6.0-1.5.9'
     // Platforms we bundle natives for. Add 'macosx-x86_64' / 'macosx-arm64' if needed.
-    nativePlatforms = ['windows-x86_64', 'linux-x86_64']
+    // java-cef has matching builds for all three, so a server can run on any of them.
+    nativePlatforms = ['windows-x86_64', 'linux-x86_64', 'linux-arm64']
 }
 
 // bytedeco ffmpeg (VP8 encode/decode) gets merged straight into the mod jar,

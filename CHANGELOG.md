@@ -46,6 +46,16 @@ normalising to a single scheme (e.g. `1.0.6`) before publishing.
 
 **Added**
 
+- **Linux arm64 servers are supported.** The FFmpeg/JavaCPP codec natives are now
+  bundled for `linux-arm64` alongside `windows-x86_64` and `linux-x86_64`, so a
+  server on AWS Graviton, Oracle Cloud Ampere A1 or a Raspberry Pi can encode
+  streams. java-cef already published matching arm64 builds; the missing codecs
+  were the only blocker, and previously they failed with a stack trace after the
+  operator had already installed Chromium. The jar grows from 32 MB to 45 MB.
+- **A clear message when the architecture is unsupported.** If the jar carries
+  codec natives but none for the running machine (macOS, Windows on ARM), the log
+  now names both the detected platform and the bundled ones instead of retrying a
+  doomed load five times and leaving a stack trace as the only clue.
 - **Private in-game reminder for operators.** An operator who places a screen
   while the natives are missing gets one private chat line pointing at the setup
   file. Non-operators are never told, and the same operator is only reminded once
@@ -201,6 +211,14 @@ Forge 1.20.1 线用的是 `1.0、1.01、1.02、1.03、1.04、1.05、1.06`；1.21
 
 **新增**
 
+- **支持 Linux arm64 服务器。** FFmpeg/JavaCPP 编解码运行库现在除 `windows-x86_64`
+  和 `linux-x86_64` 之外也打包了 `linux-arm64`，AWS Graviton、Oracle Cloud Ampere
+  A1 和树莓派上的服务器可以正常编码画面了。java-cef 本来就有对应的 arm64 构建，缺的
+  一直只是编解码器；此前服主装好 Chromium 之后才会撞上这个报错。jar 体积从 32 MB 增至
+  45 MB。
+- **架构不受支持时给出明确提示。** 如果 jar 里带了运行库但没有当前机器这一份
+  （macOS、ARM 版 Windows），日志现在会同时写出检测到的平台和已打包的平台，而不是
+  白重试五次、只留一个堆栈给人猜。
 - **给管理员的游戏内私聊提醒。** 缺少运行库时，OP 玩家放置屏幕会收到一行私聊，指向
   那个设置说明文件。普通玩家不会收到；同一个管理员五分钟内只提醒一次，搭多方块屏幕
   时不会刷屏。
