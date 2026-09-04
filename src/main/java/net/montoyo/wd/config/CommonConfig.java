@@ -123,23 +123,11 @@ public class CommonConfig {
 		@Default(valueBoolean = true)
 		public static boolean incognito = true;
 
-		@Name("jcef_download_mirror")
-		@Comment("Mirror used by the dedicated server to download the java-cef (Chromium) natives")
-		@Translation("config.webdisplaystogether.jcef_download_mirror")
-		@Default(valueStr = "https://mcef-download.cinemamod.com")
-		public static String jcefDownloadMirror = "https://mcef-download.cinemamod.com";
-
 		@Name("extra_cef_switches")
 		@Comment("Extra command-line switches passed to the server-side Chromium instance")
 		@Translation("config.webdisplaystogether.extra_cef_switches")
 		@Default(valueStr = "")
 		public static String[] extraCefSwitches = new String[0];
-
-		@Name("auto_install_dependencies")
-		@Comment("If true (default), a dedicated Linux server running as root will automatically install missing system dependencies (Xvfb and Chromium's shared libraries) using the distribution's package manager")
-		@Translation("config.webdisplaystogether.auto_install_dependencies")
-		@Default(valueBoolean = true)
-		public static boolean autoInstallDependencies = true;
 	}
 
 	@Comment("Options for the miniserver")
@@ -157,7 +145,7 @@ public class CommonConfig {
 		@Translation("config.webdisplaystogether.miniserv_quota")
 		@LongRange(minV = 0, maxV = Long.MAX_VALUE)
 		@Default(valueL = 1920)
-		public static long miniservQuota = 1024; //It's stored as a string anyway
+		public static long miniservQuota = 1920; //It's stored as a string anyway
 	}
 	
 	@SuppressWarnings("unused")

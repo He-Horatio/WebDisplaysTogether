@@ -365,17 +365,12 @@ public class WebDisplays {
      * reaches single-player worlds and LAN guests as well.
      */
     private static void sendDisclaimer(ServerPlayer ply) {
-        ply.sendSystemMessage(net.minecraft.network.chat.Component.literal("[WebDisplaysTogether] LEGAL NOTICE & DISCLAIMER")
+        ply.sendSystemMessage(net.minecraft.network.chat.Component.literal("[WebDisplaysTogether] NOTICE")
                 .withStyle(net.minecraft.ChatFormatting.GOLD, net.minecraft.ChatFormatting.BOLD));
         ply.sendSystemMessage(net.minecraft.network.chat.Component.literal(
-                "This server uses WebDisplaysTogether, which renders live third-party web content on the server "
-                + "and streams it to players. The mod's authors and contributors exercise no control over, and "
-                + "assume no responsibility or liability whatsoever for, any content accessed or displayed, nor "
-                + "for any security, privacy, data-protection or other legal risks arising from such use. All "
-                + "browsing occurs at the sole discretion and risk of the server operator and its players. Never "
-                + "enter personal credentials on shared screens. By remaining on this server with this mod "
-                + "active, you acknowledge this notice and accept these terms in full; if you do not accept "
-                + "them, discontinue use immediately.")
+                "You are playing with WebDisplaysTogether: web pages are rendered on the server and streamed to "
+                + "players. The authors assume no liability for third-party web content. Never enter personal "
+                + "credentials on shared screens. Continued use constitutes acceptance.")
                 .withStyle(net.minecraft.ChatFormatting.GRAY));
     }
 

@@ -31,6 +31,7 @@ public final class ClientStreamManager {
      */
     public static void tick() {
         Minecraft mc = Minecraft.getInstance();
+
         if (streams.isEmpty() || mc.level == null)
             return;
 
@@ -53,8 +54,8 @@ public final class ClientStreamManager {
             int audioGlitches = net.montoyo.wd.client.audio.ScreenAudioManager.pollGlitches(key.pos(), key.side());
 
             if (video[0] > 0 || audioGlitches > 0)
-                WDNetworkRegistry.INSTANCE.sendToServer(
-                        C2SMessageStreamCtrl.feedback(key.pos(), key.side(), video[0], video[1], audioGlitches));
+                WDNetworkRegistry.INSTANCE.sendToServer(C2SMessageStreamCtrl.feedback(
+                        key.pos(), key.side(), video[0], video[1], audioGlitches, video[2], video[3]));
         }
     }
 

@@ -115,6 +115,7 @@ public final class ServerBrowserManager {
             Vector2i size = browserSize(scr);
             String url = WebDisplays.applyBlacklist(scr.url != null ? scr.url : CommonConfig.Browser.homepage);
             ss = new StreamedScreen(key, nextStreamId.getAndIncrement(), url, size.x, size.y);
+            ss.setQuality(scr.quality);
             screens.put(key, ss);
             ss.ensureBrowser();
             ss.startEncoding();
@@ -140,10 +141,11 @@ public final class ServerBrowserManager {
 
     /** Delivery-quality report from a viewer; drives the stream's network adaptation. */
     public static void handleFeedback(ServerPlayer ply, BlockPos pos, BlockSide side,
-                                      int framesReceived, int videoStalls, int audioGlitches) {
+                                      int framesReceived, int videoStalls, int audioGlitches,
+                                      int arrivalIntervalMs, int minBufferedFrames) {
         StreamedScreen ss = screens.get(ScreenKey.of(ply.level(), pos, side));
         if (ss != null)
-            ss.onClientFeedback(ply, framesReceived, videoStalls, audioGlitches);
+            ss.onClientFeedback(ply, framesReceived, videoStalls, audioGlitches, arrivalIntervalMs, minBufferedFrames);
     }
 
     // ------------------------------------------------------------------
@@ -164,6 +166,13 @@ public final class ServerBrowserManager {
         }
     }
 
+    /** Applies a changed per-screen stream quality to the running stream, if any. */
+    public static void onQualityChanged(Level level, BlockPos pos, BlockSide side, net.montoyo.wd.core.ScreenQuality quality) {
+        StreamedScreen ss = screens.get(ScreenKey.of(level, pos, side));
+        if (ss != null)
+            ss.setQuality(quality);
+    }
+
     public static void onScreenRemoved(Level level, BlockPos pos, BlockSide side) {
         StreamedScreen ss = screens.remove(ScreenKey.of(level, pos, side));
         if (ss != null)
@@ -179,7 +188,7 @@ public final class ServerBrowserManager {
     // Input injection (server thread)
     // ------------------------------------------------------------------
 
-    public static void injectMouse(Level level, BlockPos pos, BlockSide side, ClickControl.ControlType event, Vector2i vec, int button) {
+    public static void injectMouse(Level level, BlockPos pos, BlockSide side, ClickControl.ControlType event, Vector2i vec, int button, UUID player) {
         StreamedScreen ss = screens.get(ScreenKey.of(level, pos, side));
         if (ss == null) {
             if (event != ClickControl.ControlType.MOVE)
@@ -195,9 +204,9 @@ public final class ServerBrowserManager {
                     event, vec != null ? "(" + vec.x + ", " + vec.y + ")" : "(last pos)", pos.toShortString(), side);
 
         if (vec != null && event != ClickControl.ControlType.MOVE)
-            ss.injectMouse(ClickControl.ControlType.MOVE, vec, -1);
+            ss.injectMouse(ClickControl.ControlType.MOVE, vec, -1, player);
 
-        ss.injectMouse(event, vec, button);
+        ss.injectMouse(event, vec, button, player);
     }
 
     public static void injectType(Level level, BlockPos pos, BlockSide side, String text) {

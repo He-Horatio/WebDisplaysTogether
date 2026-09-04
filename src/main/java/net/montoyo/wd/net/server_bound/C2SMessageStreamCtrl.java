@@ -26,6 +26,10 @@ public class C2SMessageStreamCtrl extends Packet {
     private int framesReceived;
     private int videoStalls;
     private int audioGlitches;
+    /** Smoothed interval between complete frame arrivals, ms (0 = unknown). */
+    private int arrivalIntervalMs;
+    /** Lowest preload buffer level seen while paced (255 = no paced playback). */
+    private int minBufferedFrames = 255;
 
     public C2SMessageStreamCtrl(BlockPos pos, BlockSide side, int action) {
         this.pos = pos;
@@ -35,16 +39,22 @@ public class C2SMessageStreamCtrl extends Packet {
 
     /**
      * Delivery report for one screen: complete video frames that arrived,
-     * large gaps in their arrival (each one a visible stutter) and audible
-     * audio glitches (underruns/skips). The server uses these to scale the
-     * stream down to what this viewer's connection actually sustains.
+     * large gaps in their arrival (each one a visible stutter), audible audio
+     * glitches (underruns/skips), plus the transmission speed of the preload
+     * buffer (frame arrival interval and lowest buffered-frame level). The
+     * server compares the arrival interval against its own send interval and
+     * scales the stream resolution to what this viewer's connection actually
+     * sustains.
      */
     public static C2SMessageStreamCtrl feedback(BlockPos pos, BlockSide side,
-                                                int framesReceived, int videoStalls, int audioGlitches) {
+                                                int framesReceived, int videoStalls, int audioGlitches,
+                                                int arrivalIntervalMs, int minBufferedFrames) {
         C2SMessageStreamCtrl msg = new C2SMessageStreamCtrl(pos, side, ACT_FEEDBACK);
         msg.framesReceived = Math.min(framesReceived, 0xFFFF);
         msg.videoStalls = Math.min(videoStalls, 0xFF);
         msg.audioGlitches = Math.min(audioGlitches, 0xFF);
+        msg.arrivalIntervalMs = Math.max(0, Math.min(arrivalIntervalMs, 0xFF));
+        msg.minBufferedFrames = minBufferedFrames < 0 ? 0xFF : Math.min(minBufferedFrames, 0xFE);
         return msg;
     }
 
@@ -57,6 +67,8 @@ public class C2SMessageStreamCtrl extends Packet {
             framesReceived = buf.readUnsignedShort();
             videoStalls = buf.readUnsignedByte();
             audioGlitches = buf.readUnsignedByte();
+            arrivalIntervalMs = buf.readUnsignedByte();
+            minBufferedFrames = buf.readUnsignedByte();
         }
     }
 
@@ -69,6 +81,8 @@ public class C2SMessageStreamCtrl extends Packet {
             buf.writeShort(framesReceived);
             buf.writeByte(videoStalls);
             buf.writeByte(audioGlitches);
+            buf.writeByte(arrivalIntervalMs);
+            buf.writeByte(minBufferedFrames);
         }
     }
 
@@ -86,7 +100,8 @@ public class C2SMessageStreamCtrl extends Packet {
                 case ACT_SUBSCRIBE -> ServerBrowserManager.subscribe(ply, pos, side);
                 case ACT_UNSUBSCRIBE -> ServerBrowserManager.unsubscribe(ply, pos, side);
                 case ACT_KEYFRAME -> ServerBrowserManager.requestKeyframe(ply, pos, side);
-                case ACT_FEEDBACK -> ServerBrowserManager.handleFeedback(ply, pos, side, framesReceived, videoStalls, audioGlitches);
+                case ACT_FEEDBACK -> ServerBrowserManager.handleFeedback(ply, pos, side, framesReceived, videoStalls,
+                        audioGlitches, arrivalIntervalMs, minBufferedFrames == 0xFF ? -1 : minBufferedFrames);
             }
         });
     }

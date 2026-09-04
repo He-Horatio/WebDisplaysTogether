@@ -13,6 +13,7 @@ import net.montoyo.wd.client.stream.ClientStreamManager;
 import net.montoyo.wd.config.CommonConfig;
 import net.montoyo.wd.core.BrowseMode;
 import net.montoyo.wd.core.IScreenStream;
+import net.montoyo.wd.core.ScreenQuality;
 import net.montoyo.wd.core.ScreenRights;
 import net.montoyo.wd.core.ScreenSoundMode;
 import net.montoyo.wd.utilities.*;
@@ -42,12 +43,17 @@ public class ScreenData {
     public long turnOnTime;
     public Player laserUser;
     public final Vector2i lastMousePos = new Vector2i();
+    /** Click-slop state for DOWN/MOVE/UP sequences (see ScreenBlockEntity.handleMouseEvent). */
+    public boolean clickMouseDown = false;
+    public boolean clickDragActive = false;
+    public int clickDownX, clickDownY;
     public NibbleArray redstoneStatus; //null on client
     public boolean autoVolume = false;
     public BrowseMode browseMode = BrowseMode.SERVER;
     public int brightness = 100; //0-300 percent
     public int volume = 100; //0-300 percent
     public ScreenSoundMode soundMode = ScreenSoundMode.SCREEN;
+    public ScreenQuality quality = ScreenQuality.AUTO;
 
     public int mouseType;
 
@@ -109,6 +115,9 @@ public class ScreenData {
         if (tag.contains("SoundMode"))
             ret.soundMode = ScreenSoundMode.of(tag.getByte("SoundMode"));
 
+        if (tag.contains("Quality"))
+            ret.quality = ScreenQuality.of(tag.getByte("Quality"));
+
         return ret;
     }
 
@@ -152,6 +161,7 @@ public class ScreenData {
         tag.putInt("Brightness", brightness);
         tag.putInt("Volume", volume);
         tag.putByte("SoundMode", (byte) soundMode.ordinal());
+        tag.putByte("Quality", (byte) quality.ordinal());
         return tag;
     }
 

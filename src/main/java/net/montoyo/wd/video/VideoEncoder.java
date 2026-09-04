@@ -108,7 +108,7 @@ public final class VideoEncoder implements AutoCloseable {
             // the encode a few ms per frame, speed >= 5 selects the rt path.
             av_dict_set(opts, "row-mt", "1", 0);
             av_dict_set(opts, "tile-columns", "2", 0);
-            av_dict_set(opts, "cpu-used", pixels <= 640 * 480 ? "6" : "7", 0);
+            av_dict_set(opts, "cpu-used", pixels <= 640 * 480 ? "6" : (pixels <= 1280 * 720 ? "7" : "8"), 0);
             // Cyclic refresh: continuously repairs quality where the picture
             // is static without spending a full keyframe.
             av_dict_set(opts, "aq-mode", "3", 0);

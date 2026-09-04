@@ -47,6 +47,7 @@
   "webdisplaystogether.message.upgradeOk": "Amélioration installée !",
   "webdisplaystogether.message.linkAbort": "Outil d'appairage remis à zéro.",
   "webdisplaystogether.message.otDisabled": "Le voleur d'écran est désactivé sur ce serveur",
+  "webdisplaystogether.message.nativesMissing": "Les écrans sont désactivés : le moteur Chromium n'est pas installé sur ce serveur. La marche à suivre figure dans la console du serveur et dans %s.",
   "webdisplaystogether.gui.screencfg.owner": "Propriétaire :",
   "webdisplaystogether.gui.screencfg.friends": "Amis :",
   "webdisplaystogether.gui.screencfg.permissions": "Permissions :",

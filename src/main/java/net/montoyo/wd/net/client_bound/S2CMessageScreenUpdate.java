@@ -85,9 +85,9 @@ public class S2CMessageScreenUpdate extends Packet  {
         return screenUpdate;
     }
 
-    public static S2CMessageScreenUpdate settings(ScreenBlockEntity screen, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm) {
+    public static S2CMessageScreenUpdate settings(ScreenBlockEntity screen, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm, net.montoyo.wd.core.ScreenQuality quality) {
         S2CMessageScreenUpdate screenUpdate = new S2CMessageScreenUpdate(screen.getBlockPos(), side);
-        screenUpdate.control = new ScreenSettingsControl(bm, brightness, volume, sm);
+        screenUpdate.control = new ScreenSettingsControl(bm, brightness, volume, sm, quality);
         return screenUpdate;
     }
     

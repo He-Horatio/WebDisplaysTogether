@@ -9,7 +9,9 @@ import java.nio.ByteBuffer;
 
 /**
  * Resolves the effective stream quality settings, sized for a per-player
- * bandwidth budget of roughly 3 Mbit/s. Config values of 0 mean "automatic":
+ * bandwidth budget of roughly 6 Mbit/s (enough to carry 1080p when both the
+ * CPU and the viewer's link keep up; the runtime network adaptation scales
+ * down from there). Config values of 0 mean "automatic":
  * <ul>
  * <li>the video bitrate defaults to {@link #AUTO_BUDGET_KBPS}, leaving room
  * for the Opus audio stream and Minecraft's own traffic inside the budget;</li>
@@ -25,19 +27,24 @@ public final class StreamQuality {
     }
 
     /**
-     * Default video bitrate (steady state). Opus audio adds 128 kbit/s,
-     * keeping one watching player at ~3 Mbit/s on average; short peaks
-     * (keyframes, heavy motion) may burst up to ~5 Mbit/s via the encoder's
+     * Default video bitrate ceiling (steady state). Sized so VP9 can carry
+     * 1080p at 30 fps at {@link #MIN_BPP_VP9} bits per pixel; Opus audio adds
+     * 128 kbit/s on top. This is only the upper bound of the auto range: the
+     * bitrate actually used follows the streamed resolution
+     * ({@link #bitrateKbpsFor}), and the network adaptation shrinks the
+     * stream whenever a viewer's link cannot carry it. Short peaks
+     * (keyframes, heavy motion) may burst up to ~1.7x via the encoder's
      * VBV settings in {@link VideoEncoder}.
      */
-    private static final int AUTO_BUDGET_KBPS = 2800;
+    private static final int AUTO_BUDGET_KBPS = 6000;
 
     /**
      * Minimum bits per pixel per frame before motion degrades into blocks.
      * VP9 compresses screen content noticeably better than VP8, so it can
      * afford more pixels out of the same bitrate budget: at 0.09 bpp the
-     * default budget covers exactly 1280x720 at 30 fps (921,600 pixels vs a
-     * 925,926 pixel cap), so VP9 servers stream real 720p.
+     * default budget covers 1920x1080 at 30 fps (2,073,600 pixels vs a
+     * 2,222,222 pixel cap), so VP9 servers can stream real 1080p; VP8 tops
+     * out around 900p on the same budget.
      */
     private static final double MIN_BPP_VP8 = 0.14;
     private static final double MIN_BPP_VP9 = 0.09;
@@ -78,7 +85,7 @@ public final class StreamQuality {
 
     /**
      * Absolute pixel cap regardless of CPU: the bitrate-quality cap clamped
-     * to the 360p..720p auto range (an explicit stream_max_height overrides).
+     * to the 360p..1080p auto range (an explicit stream_max_height overrides).
      * Runtime adaptation may push the stream up to this bound when measured
      * encode times show real headroom, even past the startup benchmark.
      */
@@ -90,7 +97,7 @@ public final class StreamQuality {
         double bpp = codec == StreamCodec.VP9 ? MIN_BPP_VP9 : MIN_BPP_VP8;
         long rateCap = (long) (bitrateKbps() * 1000.0 / (Math.max(1, fps) * bpp));
 
-        return Math.max(heightToPixels(360), Math.min(heightToPixels(720), rateCap));
+        return Math.max(heightToPixels(360), Math.min(heightToPixels(1080), rateCap));
     }
 
     /**
@@ -109,7 +116,8 @@ public final class StreamQuality {
         return Math.max(heightToPixels(360), Math.min(hardMaxPixels(fps, codec), cpuCap));
     }
 
-    private static long heightToPixels(int h) {
+    /** 16:9-equivalent pixel count for the given stream height (public for the per-screen quality caps). */
+    public static long heightToPixels(int h) {
         return (long) h * h * 16 / 9;
     }
 

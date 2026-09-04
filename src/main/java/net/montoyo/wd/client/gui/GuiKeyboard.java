@@ -57,6 +57,12 @@ public class GuiKeyboard extends WDScreen {
     private BlockPos kbPos;
     private boolean showWarning = true;
 
+    // Cursor MOVE throttling (matches the laser pointer's 100ms rate).
+    // Without it this GUI resent the cursor position every tick, flooding the
+    // server and drowning out other players' slower-paced mouse input.
+    private long lastMoveSentMs = 0;
+    private double lastMoveX = Double.NaN, lastMoveY = Double.NaN;
+
     @FillControl
     private Label lblInfo;
 
@@ -305,10 +311,24 @@ public class GuiKeyboard extends WDScreen {
 
     @Override
     public void mouseMoved(double mouseX, double mouseY) {
-        mouse(mouseX, mouseY, (hit) ->
-            WDNetworkRegistry.INSTANCE.sendToServer(C2SMessageScreenCtrl.laserMove(tes, side, hit)));
+        sendMoveThrottled(mouseX, mouseY);
 
         super.mouseMoved(mouseX, mouseY);
+    }
+
+    /** Sends a cursor MOVE at most every 100ms, and only when it actually moved. */
+    private void sendMoveThrottled(double mouseX, double mouseY) {
+        long now = System.currentTimeMillis();
+        if (mouseX == lastMoveX && mouseY == lastMoveY)
+            return;
+        if (now - lastMoveSentMs < 100)
+            return;
+
+        lastMoveSentMs = now;
+        lastMoveX = mouseX;
+        lastMoveY = mouseY;
+        mouse(mouseX, mouseY, (hit) ->
+            WDNetworkRegistry.INSTANCE.sendToServer(C2SMessageScreenCtrl.laserMove(tes, side, hit)));
     }
 
     @Override
@@ -336,8 +356,7 @@ public class GuiKeyboard extends WDScreen {
         double mouseX = Minecraft.getInstance().mouseHandler.xpos() / Minecraft.getInstance().getWindow().getWidth();
         double mouseY = Minecraft.getInstance().mouseHandler.ypos() / Minecraft.getInstance().getWindow().getHeight();
 
-        mouse(mouseX * width, mouseY * height, (hit) ->
-            WDNetworkRegistry.INSTANCE.sendToServer(C2SMessageScreenCtrl.laserMove(tes, side, hit)));
+        sendMoveThrottled(mouseX * width, mouseY * height);
 
         super.tick();
     }

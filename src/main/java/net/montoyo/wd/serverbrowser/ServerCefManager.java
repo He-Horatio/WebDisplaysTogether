@@ -2,12 +2,16 @@ package net.montoyo.wd.serverbrowser;
 
 import com.cinemamod.mcef.MCEF;
 import com.cinemamod.mcef.MCEFPlatform;
+import net.minecraft.ChatFormatting;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.fml.loading.FMLPaths;
 import net.montoyo.wd.WebDisplays;
 import net.montoyo.wd.config.CommonConfig;
 import net.montoyo.wd.utilities.Log;
+import net.montoyo.wd.utilities.serialization.Util;
 import org.cef.CefApp;
 import org.cef.CefClient;
 import org.cef.CefSettings;
@@ -19,15 +23,16 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -37,11 +42,15 @@ import java.util.zip.GZIPInputStream;
 /**
  * Owns the CEF context used for server-side (world) browsers.
  *
- * - Dedicated server: downloads the java-cef natives (same builds MCEF uses),
- *   initializes a headless CefApp and pumps its message loop on a dedicated thread.
+ * - Dedicated server: picks up the java-cef natives from mods/mcef-libraries
+ *   (the same builds MCEF uses), initializes a headless CefApp and pumps its
+ *   message loop on a dedicated thread. The natives are not shipped in the jar
+ *   and this class never downloads them: unless a build bundles the archive,
+ *   the server owner installs them by hand.
  * - Integrated server (single-player / LAN): reuses the client's MCEF CefApp/CefClient,
  *   whose message loop is already pumped on the render thread. Only one CefApp may
- *   exist per JVM, so this is mandatory.
+ *   exist per JVM, so this is mandatory. Nothing has to be installed: MCEF already
+ *   provides the runtime on a client.
  */
 public final class ServerCefManager {
     private ServerCefManager() {
@@ -264,6 +273,11 @@ public final class ServerCefManager {
             bootstrapDedicated();
             ready = true;
             Log.info("Server-side CEF is ready.");
+        } catch (SetupRequiredException t) {
+            // Not an error: the server keeps running, screens just stay off.
+            failed = true;
+            Log.warning("Screens are disabled - %s", t.getMessage());
+            return;
         } catch (Throwable t) {
             failed = true;
             Log.errorEx("Failed to initialize server-side CEF. Screens will stay black.", t);
@@ -370,8 +384,36 @@ public final class ServerCefManager {
                 ServerScreenBrowser b = holder[0];
                 if (b != null) {
                     if (content)
-                        selfTestInput(b);
+                        selfTestInput(b, "640x480");
                     submit(b::closeBrowser);
+                }
+
+                // Repeat the input test on screen-sized browsers: input
+                // handling in CEF can behave differently at large view sizes.
+                if (content) {
+                    int[][] sizes = {{1920, 1066}};
+                    for (int[] size : sizes) {
+                        int w = size[0], h = size[1];
+                        ServerScreenBrowser big = selfTestCreateBrowser(w, h);
+                        if (big != null) {
+                            selfTestInput(big, w + "x" + h);
+                            submit(big::closeBrowser);
+                        }
+                    }
+
+                    // Jittered clicks: small screen (usually below the drag
+                    // threshold) vs. large screen (bug reproduction).
+                    selfTestJitterClick(480, 352, 2);
+                    selfTestJitterClick(1920, 1066, 8);
+
+                    // Event-delivery probe on a real, complex page.
+                    selfTestDeliveryProbe(640, 480);
+                    selfTestDeliveryProbe(1920, 1066);
+
+                    // Real-site navigation probe: click video cards on bilibili
+                    // and check whether the view navigates (target=_blank flow).
+                    selfTestBilibiliClicks(992, 608, new int[][]{{300, 400}, {496, 304}, {700, 450}});
+                    selfTestBilibiliClicks(1920, 1066, new int[][]{{170, 230}, {300, 450}, {660, 450}, {960, 600}});
                 }
             } catch (InterruptedException ignored) {
             }
@@ -425,7 +467,177 @@ public final class ServerCefManager {
      * verifies the page reacted. Proves that in-game clicks can drive the
      * server-side browser on this machine. Blocking; call from the watcher thread.
      */
-    private static void selfTestInput(ServerScreenBrowser b) {
+    /** Creates a browser of the given size for self tests (blocking). */
+    private static ServerScreenBrowser selfTestCreateBrowser(int w, int h) throws InterruptedException {
+        ServerScreenBrowser[] holder = new ServerScreenBrowser[1];
+        submit(() -> {
+            try {
+                ServerScreenBrowser b = new ServerScreenBrowser(cefClient, "about:blank", w, h, createRequestContext());
+                b.setCloseAllowed();
+                b.createImmediately();
+                holder[0] = b;
+            } catch (Throwable t) {
+                Log.errorEx("CEF self test: failed to create a test browser", t);
+            }
+        });
+        Thread.sleep(2000);
+        return holder[0];
+    }
+
+    /**
+     * Loads a real, complex page (bilibili) and verifies that an injected
+     * click is actually DELIVERED to the page DOM: a capturing mousedown
+     * listener replaces the whole document with a solid green page.
+     */
+    private static void selfTestDeliveryProbe(int w, int h) {
+        String label = w + "x" + h;
+        try {
+            ServerScreenBrowser b = selfTestCreateBrowser(w, h);
+            if (b == null)
+                return;
+
+            Log.info("Delivery probe (%s): loading bilibili...", label);
+            submit(() -> b.loadURL("https://www.bilibili.com/"));
+            Thread.sleep(12000); // let the page load and settle
+
+            String probeJs = "document.addEventListener('mousedown', function(){"
+                    + "document.documentElement.innerHTML='';"
+                    + "document.documentElement.style.background='#00ff00';"
+                    + "}, true);";
+            submit(() -> b.executeJavaScript(probeJs, b.getURL(), 0));
+            Thread.sleep(1000);
+
+            submit(() -> {
+                int cx = w / 2, cy = h / 2;
+                b.sendMouseMove(cx, cy);
+                b.sendMousePress(cx, cy, 0);
+                b.sendMouseRelease(cx, cy, 0);
+                b.setFocus(true);
+            });
+
+            if (waitForCenter(b, (r, g, bl) -> g > 180 && r < 100 && bl < 100, 10000))
+                Log.info("Delivery probe (%s) PASSED: the injected click reached the page DOM.", label);
+            else
+                Log.warning("Delivery probe (%s) FAILED: the injected click never reached the page DOM.", label);
+
+            submit(b::closeBrowser);
+        } catch (Throwable t) {
+            Log.errorEx("Delivery probe crashed", t);
+        }
+    }
+
+    /**
+     * Loads bilibili at the given size and clicks the given view coordinates,
+     * reporting whether each click navigated the top frame (video cards are
+     * target="_blank" links, so this exercises the popup-redirect patch on a
+     * real site).
+     */
+    private static void selfTestBilibiliClicks(int w, int h, int[][] points) {
+        String label = w + "x" + h;
+        try {
+            ServerScreenBrowser b = selfTestCreateBrowser(w, h);
+            if (b == null)
+                return;
+
+            Log.info("Bilibili click probe (%s): loading bilibili...", label);
+            submit(() -> b.loadURL("https://www.bilibili.com/"));
+            Thread.sleep(15000);
+
+            for (int[] p : points) {
+                String before = b.getURL();
+                submit(() -> {
+                    b.sendMouseMove(p[0], p[1]);
+                    b.sendMousePress(p[0], p[1], 0);
+                    b.sendMouseRelease(p[0], p[1], 0);
+                    b.setFocus(true);
+                });
+
+                String after = before;
+                long deadline = System.currentTimeMillis() + 6000;
+                while (System.currentTimeMillis() < deadline) {
+                    Thread.sleep(500);
+                    after = b.getURL();
+                    if (after != null && !after.equals(before))
+                        break;
+                }
+
+                if (after != null && !after.equals(before)) {
+                    Log.info("Bilibili click probe (%s): click at (%d, %d) NAVIGATED -> %s", label, p[0], p[1], after);
+                    submit(() -> b.loadURL("https://www.bilibili.com/"));
+                    Thread.sleep(10000);
+                } else {
+                    Log.warning("Bilibili click probe (%s): click at (%d, %d) did nothing (url stays %s)", label, p[0], p[1], before);
+                }
+            }
+
+            submit(b::closeBrowser);
+        } catch (Throwable t) {
+            Log.errorEx("Bilibili click probe crashed", t);
+        }
+    }
+
+    /**
+     * Reproduces the "large screen ignores clicks" bug: a click whose DOWN and
+     * UP are a few pixels apart (crosshair jitter, amplified by big browser
+     * resolutions) starts a link drag in Chromium and never produces a DOM
+     * click. Expected result WITHOUT the click-slop fix: no navigation.
+     */
+    private static void selfTestJitterClick(int w, int h, int jitterPx) {
+        String label = w + "x" + h + " jitter=" + jitterPx + "px";
+        try {
+            ServerScreenBrowser b = selfTestCreateBrowser(w, h);
+            if (b == null)
+                return;
+
+            String html = "<html><body style='margin:0;background:#f00'>"
+                    + "<a target='_blank' href='https://example.com/' "
+                    + "style='position:fixed;left:0;top:0;right:0;bottom:0'></a></body></html>";
+            String url = "data:text/html;base64,"
+                    + java.util.Base64.getEncoder().encodeToString(html.getBytes(StandardCharsets.UTF_8));
+            submit(() -> b.loadURL(url));
+
+            if (!waitForCenter(b, (r, g, bl) -> r > 150 && g < 80 && bl < 80, 15000)) {
+                Log.warning("Jitter click test (%s) SKIPPED: test page never rendered.", label);
+                submit(b::closeBrowser);
+                return;
+            }
+
+            String before = b.getURL();
+            int cx = w / 2, cy = h / 2;
+            submit(() -> {
+                // What the server receives from GuiKeyboard: DOWN, then MOVEs
+                // from the per-tick cursor resend, then UP at the drifted pos.
+                b.sendMouseMove(cx, cy);
+                b.sendMousePress(cx, cy, 0);
+                b.sendMouseMove(cx + jitterPx / 2, cy + jitterPx / 2);
+                b.sendMouseMove(cx + jitterPx, cy + jitterPx);
+                b.sendMouseRelease(cx + jitterPx, cy + jitterPx, 0);
+                b.setFocus(true);
+            });
+
+            boolean navigated = false;
+            long deadline = System.currentTimeMillis() + 6000;
+            while (System.currentTimeMillis() < deadline) {
+                Thread.sleep(500);
+                String after = b.getURL();
+                if (after != null && !after.equals(before)) {
+                    navigated = true;
+                    break;
+                }
+            }
+
+            if (navigated)
+                Log.info("Jitter click test (%s): click still NAVIGATED (drag threshold not hit).", label);
+            else
+                Log.warning("Jitter click test (%s): click was SWALLOWED by Chromium's link drag - large-screen bug reproduced.", label);
+
+            submit(b::closeBrowser);
+        } catch (Throwable t) {
+            Log.errorEx("Jitter click test crashed", t);
+        }
+    }
+
+    private static void selfTestInput(ServerScreenBrowser b, String label) {
         try {
             // The worst case in-game: a full click (press+release on the same
             // element) on a target="_blank" link - the popup must be redirected
@@ -438,11 +650,11 @@ public final class ServerCefManager {
             String url = "data:text/html;base64,"
                     + java.util.Base64.getEncoder().encodeToString(html.getBytes(StandardCharsets.UTF_8));
 
-            Log.info("Input self test: loading a click-sensitive test page...");
+            Log.info("Input self test (%s): loading a click-sensitive test page...", label);
             submit(() -> b.loadURL(url));
 
             if (!waitForCenter(b, (r, g, bl) -> r > 150 && g < 80 && bl < 80, 15000)) {
-                Log.warning("Input self test SKIPPED: the test page never rendered (red frame not seen).");
+                Log.warning("Input self test (%s) SKIPPED: the test page never rendered (red frame not seen).", label);
                 return;
             }
 
@@ -460,11 +672,11 @@ public final class ServerCefManager {
 
             // example.com is a near-white page: distinctly different from red
             if (waitForCenter(b, (r, g, bl) -> r > 150 && g > 150 && bl > 150, 15000))
-                Log.info("Input self test PASSED: an injected click on a target=_blank link navigated the view. "
-                        + "In-game clicks (including new-tab links) work on this machine.");
+                Log.info("Input self test (%s) PASSED: an injected click on a target=_blank link navigated the view. "
+                        + "In-game clicks (including new-tab links) work on this machine.", label);
             else
-                Log.warning("Input self test FAILED: the injected click did not navigate. "
-                        + "Players will not be able to interact with screens.");
+                Log.warning("Input self test (%s) FAILED: the injected click did not navigate. "
+                        + "Players will not be able to interact with screens.", label);
         } catch (Throwable t) {
             Log.errorEx("Input self test crashed", t);
         }
@@ -561,11 +773,6 @@ public final class ServerCefManager {
     private static String startPrivateXvfb() throws Exception {
         String xvfb = findExecutable("Xvfb");
         if (xvfb == null) {
-            Log.info("Xvfb is not installed; trying to install it automatically...");
-            if (tryAutoInstall(PKG_XVFB))
-                xvfb = findExecutable("Xvfb");
-        }
-        if (xvfb == null) {
             throw new IllegalStateException(
                     "This server has no X display and Xvfb is not installed. Server-side browsing needs one of the two.\n"
                     + "  - Install Xvfb: 'apt install xvfb' (Debian/Ubuntu) or 'dnf install xorg-x11-server-Xvfb' (Fedora/RHEL).\n"
@@ -624,177 +831,6 @@ public final class ServerCefManager {
         xvfbProcess = null;
         if (proc != null && proc.isAlive())
             proc.destroy();
-    }
-
-    // ------------------------------------------------------------------
-    // Automatic installation of missing system dependencies (Linux)
-    // ------------------------------------------------------------------
-
-    private static final int PKG_XVFB = 0;
-    private static final int PKG_CEF_LIBS = 1;
-
-    private static final class PkgManager {
-        final String bin;
-        final String[] updateCmd; // run once before installing, may be null
-        final String[] installPrefix;
-        final String xvfbPkg;
-        final String[] cefLibPkgs;
-
-        PkgManager(String bin, String[] updateCmd, String[] installPrefix, String xvfbPkg, String[] cefLibPkgs) {
-            this.bin = bin;
-            this.updateCmd = updateCmd;
-            this.installPrefix = installPrefix;
-            this.xvfbPkg = xvfbPkg;
-            this.cefLibPkgs = cefLibPkgs;
-        }
-    }
-
-    private static final PkgManager[] PKG_MANAGERS = {
-            new PkgManager("apt-get",
-                    new String[]{"apt-get", "update", "-qq"},
-                    new String[]{"apt-get", "install", "-y", "-qq", "--no-install-recommends"},
-                    "xvfb",
-                    new String[]{"libnss3", "libnspr4", "libatk1.0-0", "libatk-bridge2.0-0", "libcups2", "libdrm2",
-                            "libxkbcommon0", "libxcomposite1", "libxdamage1", "libxfixes3", "libxrandr2", "libgbm1",
-                            "libasound2", "libpango-1.0-0", "libcairo2", "libxss1", "libxtst6", "libexpat1",
-                            "libx11-6", "libxcb1", "libxext6", "libxi6", "libxrender1", "libglib2.0-0"}),
-            new PkgManager("dnf", null,
-                    new String[]{"dnf", "install", "-y"},
-                    "xorg-x11-server-Xvfb",
-                    new String[]{"nss", "nspr", "atk", "at-spi2-atk", "cups-libs", "libdrm", "libxkbcommon",
-                            "libXcomposite", "libXdamage", "libXfixes", "libXrandr", "mesa-libgbm", "alsa-lib",
-                            "pango", "cairo", "libXScrnSaver", "libXtst", "expat", "libX11", "libxcb", "libXext",
-                            "libXi", "libXrender", "glib2"}),
-            new PkgManager("yum", null,
-                    new String[]{"yum", "install", "-y"},
-                    "xorg-x11-server-Xvfb",
-                    new String[]{"nss", "nspr", "atk", "at-spi2-atk", "cups-libs", "libdrm", "libxkbcommon",
-                            "libXcomposite", "libXdamage", "libXfixes", "libXrandr", "mesa-libgbm", "alsa-lib",
-                            "pango", "cairo", "libXScrnSaver", "libXtst", "expat", "libX11", "libxcb", "libXext",
-                            "libXi", "libXrender", "glib2"}),
-            new PkgManager("zypper", null,
-                    new String[]{"zypper", "--non-interactive", "install"},
-                    "xorg-x11-server-extra",
-                    new String[]{"mozilla-nss", "libatk-1_0-0", "libcups2", "libdrm2", "libxkbcommon0",
-                            "libXcomposite1", "libXdamage1", "libXfixes3", "libXrandr2", "libgbm1", "libasound2",
-                            "libpango-1_0-0", "libcairo2", "libXss1", "libXtst6", "libexpat1", "libX11-6",
-                            "libxcb1", "libXext6", "libXi6", "libXrender1"}),
-            new PkgManager("pacman", null,
-                    new String[]{"pacman", "-S", "--noconfirm", "--needed"},
-                    "xorg-server-xvfb",
-                    new String[]{"nss", "nspr", "atk", "at-spi2-atk", "libcups", "libdrm", "libxkbcommon",
-                            "libxcomposite", "libxdamage", "libxfixes", "libxrandr", "mesa", "alsa-lib", "pango",
-                            "cairo", "libxss", "libxtst", "expat", "libx11", "libxcb", "libxext", "libxi",
-                            "libxrender", "glib2"}),
-    };
-
-    /**
-     * Best-effort automatic installation of system dependencies through the
-     * distribution's package manager. Only runs when enabled in the config and
-     * the server process is root (the usual case for game servers/containers).
-     * Individual package failures are tolerated (package names shift between
-     * distro releases); the caller re-checks whether the dependency is now
-     * available.
-     */
-    private static boolean tryAutoInstall(int what) {
-        if (!CommonConfig.Stream.autoInstallDependencies) {
-            Log.info("auto_install_dependencies is disabled; not installing anything.");
-            return false;
-        }
-        if (!"root".equals(System.getProperty("user.name"))) {
-            Log.warning("Not running as root; cannot install system packages automatically. "
-                    + "Ask your server admin to install them (see messages above/below).");
-            return false;
-        }
-
-        PkgManager pm = null;
-        for (PkgManager cand : PKG_MANAGERS) {
-            if (findExecutable(cand.bin) != null) {
-                pm = cand;
-                break;
-            }
-        }
-        if (pm == null) {
-            Log.warning("No supported package manager found (apt-get/dnf/yum/zypper/pacman).");
-            return false;
-        }
-
-        String[] pkgs = what == PKG_XVFB ? new String[]{pm.xvfbPkg} : pm.cefLibPkgs;
-        Log.info("Installing %d package(s) with %s: %s", pkgs.length, pm.bin, String.join(" ", pkgs));
-
-        if (pm.updateCmd != null)
-            runPkgCommand(pm.updateCmd, 300); // refresh package lists; failure is not fatal
-
-        // Bulk install first (fast path); on failure fall back to per-package
-        // installs so one renamed package doesn't sink all the others.
-        String[] bulk = Arrays.copyOf(pm.installPrefix, pm.installPrefix.length + pkgs.length);
-        System.arraycopy(pkgs, 0, bulk, pm.installPrefix.length, pkgs.length);
-
-        if (runPkgCommand(bulk, 900) == 0) {
-            Log.info("Dependency installation finished.");
-            return true;
-        }
-
-        Log.warning("Bulk install failed; retrying package by package...");
-        int ok = 0;
-        for (String pkg : pkgs) {
-            String[] cmd = Arrays.copyOf(pm.installPrefix, pm.installPrefix.length + 1);
-            cmd[cmd.length - 1] = pkg;
-            if (runPkgCommand(cmd, 300) == 0)
-                ok++;
-            else
-                Log.warning("Could not install package '%s' (it may be named differently on this distro).", pkg);
-        }
-        Log.info("Installed %d/%d packages.", ok, pkgs.length);
-        return ok > 0;
-    }
-
-    /** Runs a package manager command, logging its tail on failure. Returns the exit code (-1 on error/timeout). */
-    private static int runPkgCommand(String[] cmd, long timeoutSec) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(cmd).redirectErrorStream(true);
-            pb.environment().put("DEBIAN_FRONTEND", "noninteractive");
-            Process proc = pb.start();
-
-            StringBuilder out = new StringBuilder();
-            Thread reader = new Thread(() -> {
-                try (InputStream is = proc.getInputStream()) {
-                    byte[] buf = new byte[4096];
-                    int read;
-                    while ((read = is.read(buf)) != -1) {
-                        synchronized (out) {
-                            out.append(new String(buf, 0, read, StandardCharsets.UTF_8));
-                            if (out.length() > 8192)
-                                out.delete(0, out.length() - 8192);
-                        }
-                    }
-                } catch (IOException ignored) {
-                }
-            }, "WDT-PkgInstall-Reader");
-            reader.setDaemon(true);
-            reader.start();
-
-            if (!proc.waitFor(timeoutSec, TimeUnit.SECONDS)) {
-                proc.destroyForcibly();
-                Log.warning("Command timed out: %s", String.join(" ", cmd));
-                return -1;
-            }
-
-            int code = proc.exitValue();
-            if (code != 0) {
-                String tail;
-                synchronized (out) {
-                    String s = out.toString().trim();
-                    String[] lines = s.split("\n");
-                    tail = String.join("\n", Arrays.copyOfRange(lines, Math.max(0, lines.length - 5), lines.length));
-                }
-                Log.warning("Command failed (%d): %s\n%s", code, String.join(" ", cmd), tail);
-            }
-            return code;
-        } catch (Exception e) {
-            Log.warning("Could not run %s: %s", String.join(" ", cmd), e.toString());
-            return -1;
-        }
     }
 
     /**
@@ -875,7 +911,7 @@ public final class ServerCefManager {
         String commit = MCEF.getJavaCefCommit();
         Log.info("java-cef commit: %s", commit);
 
-        downloadNativesIfNeeded(librariesDir, platform, commit);
+        ensureNativesInstalled(librariesDir, platform, commit);
 
         // Ensure binaries are executable on unix
         if (platform.isLinux()) {
@@ -964,26 +1000,13 @@ public final class ServerCefManager {
                 throw new IllegalStateException("CefApp.startup() failed");
         } catch (UnsatisfiedLinkError e) {
             // Typical on minimal server distros: libcef.so needs shared libraries
-            // that desktop systems have but server images don't. Try to install
-            // them automatically, then retry once.
-            Log.warning("CEF natives failed to load (%s); trying to install missing system libraries...", e.getMessage());
-
-            boolean retryWorked = false;
-            if (platform.isLinux() && tryAutoInstall(PKG_CEF_LIBS)) {
-                try {
-                    if (!CefApp.startup(cefSwitches))
-                        throw new IllegalStateException("CefApp.startup() failed");
-                    retryWorked = true;
-                } catch (UnsatisfiedLinkError ignored) {
-                }
-            }
-
-            if (!retryWorked) {
-                throw new IllegalStateException(
-                        "Failed to load the CEF native libraries. On minimal Linux servers, install Chromium's runtime dependencies first:\n"
-                        + "  Debian/Ubuntu: apt install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 "
-                        + "libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 libxss1 libxtst6 libexpat1", e);
-            }
+            // that desktop systems have but server images don't.
+            throw new IllegalStateException(
+                    "Failed to load the CEF native libraries. On minimal Linux servers, install Chromium's runtime dependencies first:\n"
+                    + "  Debian/Ubuntu: apt install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 "
+                    + "libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2 libpango-1.0-0 libcairo2 libxss1 libxtst6 libexpat1\n"
+                    + "  Fedora/RHEL:   dnf install nss nspr atk at-spi2-atk cups-libs libdrm libxkbcommon libXcomposite libXdamage "
+                    + "libXfixes libXrandr mesa-libgbm alsa-lib pango cairo libXScrnSaver libXtst expat", e);
         }
 
         CefSettings cefSettings = new CefSettings();
@@ -1081,135 +1104,185 @@ public final class ServerCefManager {
         }
     }
 
-    private static void downloadNativesIfNeeded(File librariesDir, MCEFPlatform platform, String commit) throws IOException {
-        String mirror = CommonConfig.Stream.jcefDownloadMirror;
-        String base = mirror + "/java-cef-builds/" + commit + "/" + platform.getNormalizedName();
+    /** Classpath directory holding the java-cef natives archives when bundled at build time. */
+    private static final String BUNDLED_NATIVES_ROOT = "/wd_natives/";
 
-        File checksumFile = new File(librariesDir, platform.getNormalizedName() + ".tar.gz.sha256");
-        File platformDir = new File(librariesDir, platform.getNormalizedName());
+    /** Where MCEF publishes the java-cef builds. Only ever quoted in setup instructions. */
+    private static final String NATIVES_HOST = "https://mcef-download.cinemamod.com";
 
-        String remoteChecksum = fetchString(base + ".tar.gz.sha256");
-        String localChecksum = checksumFile.exists()
-                ? new String(Files.readAllBytes(checksumFile.toPath()), StandardCharsets.UTF_8)
-                : null;
+    /** Written next to vanilla's eula.txt when the natives turn out to be missing. */
+    private static final String SETUP_FILE_NAME = "webdisplaystogether-setup.txt";
 
-        if (platformDir.isDirectory()) {
-            if (remoteChecksum == null) {
-                // Mirror unreachable: trust what we have instead of failing the whole bootstrap.
-                Log.warning("Could not reach the java-cef mirror to verify the natives; using the existing ones.");
-                return;
-            }
-            if (remoteChecksum.trim().equals(localChecksum == null ? null : localChecksum.trim())) {
-                Log.info("java-cef natives are up to date.");
-                return;
-            }
-        } else if (remoteChecksum == null) {
-            throw new IOException("java-cef natives are missing and the mirror is unreachable: " + base + ".tar.gz\n"
-                    + "You can install them manually: download the archive on another machine and extract it into "
-                    + platformDir.getAbsolutePath());
+    /** Set while screens are off because the java-cef natives are not installed. */
+    private static volatile boolean setupPending = false;
+
+    /** How long before the same operator is reminded about the pending setup again. */
+    private static final long SETUP_REMINDER_COOLDOWN_MS = 5 * 60 * 1000L;
+    private static final Map<UUID, Long> setupReminded = new ConcurrentHashMap<>();
+
+    /** Thrown when the server owner still has something to do before CEF can start. */
+    private static final class SetupRequiredException extends IOException {
+        SetupRequiredException(String msg) {
+            super(msg);
         }
-
-        File archive = new File(librariesDir, platform.getNormalizedName() + ".tar.gz");
-        String expectedSha = remoteChecksum == null ? null : remoteChecksum.trim().split("\\s+")[0];
-
-        IOException lastError = null;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-            try {
-                Log.info("Downloading java-cef natives (%s), attempt %d/3... this can take a few minutes",
-                        platform.getNormalizedName(), attempt);
-                downloadFile(base + ".tar.gz", archive);
-
-                if (expectedSha != null) {
-                    String actualSha = sha256Hex(archive);
-                    if (!expectedSha.equalsIgnoreCase(actualSha)) {
-                        archive.delete(); // corrupt; restart from scratch on the next attempt
-                        throw new IOException("Checksum mismatch for " + archive.getName()
-                                + " (expected " + expectedSha + ", got " + actualSha + ")");
-                    }
-                }
-
-                lastError = null;
-                break;
-            } catch (IOException e) {
-                lastError = e;
-                Log.warningEx("java-cef natives download attempt " + attempt + " failed"
-                        + (attempt < 3 ? "; retrying (the download resumes where it stopped)" : ""), e);
-            }
-        }
-        if (lastError != null)
-            throw lastError;
-
-        Log.info("Extracting java-cef natives...");
-        extractTarGz(archive, librariesDir);
-        archive.delete();
-
-        if (remoteChecksum != null)
-            Files.write(checksumFile.toPath(), remoteChecksum.getBytes(StandardCharsets.UTF_8));
     }
 
-    private static String fetchString(String url) {
+    private static File setupFile() {
+        return FMLPaths.GAMEDIR.get().resolve(SETUP_FILE_NAME).toFile();
+    }
+
+    /**
+     * How to put the java-cef natives in place. The mod never fetches anything
+     * itself, so on a dedicated server this is the whole install procedure.
+     */
+    private static String setupInstructions(MCEFPlatform platform, File platformDir, String commit) {
+        String archive = platform.getNormalizedName() + ".tar.gz";
+        return "Download " + NATIVES_HOST + "/java-cef-builds/" + commit + "/" + archive + "\n"
+                + "(its SHA-256 is published next to it as " + archive + ".sha256) and extract it\n"
+                + "so that its contents end up in " + platformDir.getAbsolutePath() + "\n"
+                + "These are the same files MCEF installs on clients, so copying the\n"
+                + "mods/mcef-libraries folder off a machine that already ran the client works too.";
+    }
+
+    /**
+     * Drops the install instructions next to vanilla's eula.txt, where a server
+     * owner will actually find them, instead of only in a console line that has
+     * long scrolled away by the time anyone notices the screens are black.
+     */
+    private static void writeSetupFile(MCEFPlatform platform, File platformDir, String commit) {
+        File file = setupFile();
         try {
-            HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
-            if (conn.getResponseCode() != 200)
-                return null;
-            try (InputStream is = conn.getInputStream()) {
-                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-            }
+            Files.write(file.toPath(), (
+                    "WebDisplaysTogether: screens are disabled on this server.\n"
+                    + "\n"
+                    + "Screens are rendered by Chromium (java-cef), which this mod neither ships\n"
+                    + "nor downloads. Install it once, by hand:\n"
+                    + "\n"
+                    + setupInstructions(platform, platformDir, commit) + "\n"
+                    + "\n"
+                    + "Then restart the server. Everything else keeps working in the meantime.\n"
+                    + "You can delete this file; it is rewritten whenever the natives are missing.\n"
+                    + "\n"
+                    + "A headless Linux server also needs Chromium's shared libraries and an X\n"
+                    + "display. The mod prints the package list for your distribution on startup\n"
+                    + "and starts its own Xvfb if no display is available.\n").getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {
-            return null;
+            Log.warning("Could not create %s: %s", file.getAbsolutePath(), e.toString());
         }
     }
 
     /**
-     * Downloads {@code url} to {@code dst}, resuming a previous partial download
-     * if the server supports HTTP ranges, and logging progress every few seconds
-     * so slow mirrors don't look like a hang.
+     * Privately reminds an operator that the natives still have to be installed.
+     * Building a multiblock screen fires once per block placed, so the same
+     * player is only told again after a cooldown.
      */
-    private static void downloadFile(String url, File dst) throws IOException {
-        long have = dst.isFile() ? dst.length() : 0;
+    public static void remindOperatorAboutSetup(Player player) {
+        if (!setupPending || !(player instanceof ServerPlayer) || !player.hasPermissions(2))
+            return;
 
-        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(60000);
-        if (have > 0)
-            conn.setRequestProperty("Range", "bytes=" + have + "-");
+        long now = System.currentTimeMillis();
+        Long last = setupReminded.get(player.getUUID());
+        if (last != null && now - last < SETUP_REMINDER_COOLDOWN_MS)
+            return;
 
-        int code = conn.getResponseCode();
-        boolean append;
-        if (code == 206 && have > 0) {
-            append = true;
-            Log.info("Resuming download at %d MB.", have / (1024 * 1024));
-        } else if (code == 200) {
-            append = false;
-            have = 0;
-        } else {
-            throw new IOException("HTTP " + code + " for " + url);
+        setupReminded.put(player.getUUID(), now);
+        Util.toast(player, ChatFormatting.GOLD, "nativesMissing", SETUP_FILE_NAME);
+    }
+
+    /**
+     * Makes sure the java-cef natives are in mods/mcef-libraries. Local builds
+     * may bundle the archive inside the jar; the published jars cannot (mod
+     * hosting sites reject executables inside archives) and the mod never
+     * fetches anything over the network, so there they have to be installed by
+     * hand, exactly like any other server-side native library.
+     */
+    private static void ensureNativesInstalled(File librariesDir, MCEFPlatform platform, String commit) throws IOException {
+        File platformDir = new File(librariesDir, platform.getNormalizedName());
+        File markerFile = new File(librariesDir, platform.getNormalizedName() + ".commit");
+
+        String installed = markerFile.isFile()
+                ? new String(Files.readAllBytes(markerFile.toPath()), StandardCharsets.UTF_8).trim()
+                : null;
+        if (platformDir.isDirectory() && commit.equals(installed)) {
+            Log.info("java-cef natives are already installed.");
+            return;
         }
 
-        long total = have + Math.max(0, conn.getContentLengthLong());
-        long done = have;
-        long lastLog = System.currentTimeMillis();
+        String resource = BUNDLED_NATIVES_ROOT + platform.getNormalizedName() + ".tar.gz";
+        File archive = new File(librariesDir, platform.getNormalizedName() + ".tar.gz.tmp");
 
-        try (InputStream is = new BufferedInputStream(conn.getInputStream());
-             FileOutputStream os = new FileOutputStream(dst, append)) {
+        if (ServerCefManager.class.getResource(resource) == null) {
+            // No marker file usually just means the natives were installed by
+            // hand or copied over from a client, which is the expected setup.
+            if (platformDir.isDirectory()) {
+                if (installed == null)
+                    Log.info("Using the java-cef natives found in %s.", platformDir.getAbsolutePath());
+                else
+                    Log.warning("The java-cef natives in %s were installed for commit %s but MCEF expects %s; "
+                            + "using them as they are.", platformDir.getAbsolutePath(), installed, commit);
+                return;
+            }
+
+            setupPending = true;
+            writeSetupFile(platform, platformDir, commit);
+            throw new SetupRequiredException("Chromium (java-cef) is not installed on this server.\n"
+                    + setupInstructions(platform, platformDir, commit) + "\n"
+                    + "These instructions are also in " + setupFile().getAbsolutePath());
+        }
+
+        String bundledCommit = readBundledText(BUNDLED_NATIVES_ROOT + "commit.txt");
+        if (bundledCommit != null && !bundledCommit.equals(commit)) {
+            if (platformDir.isDirectory()) {
+                Log.warning("The bundled java-cef natives are for commit %s but MCEF expects %s; "
+                        + "keeping the natives already present in %s.", bundledCommit, commit, platformDir.getAbsolutePath());
+                return;
+            }
+            throw new IOException("The java-cef natives bundled in this jar are for commit " + bundledCommit
+                    + " but the installed MCEF version expects commit " + commit + ".\n"
+                    + "Use the mod build that matches your MCEF version.");
+        }
+
+        Log.info("Installing the bundled java-cef natives (%s)...", platform.getNormalizedName());
+
+        // Copy the archive out of the jar first: the tar.gz is ~150MB and
+        // the extractor needs to read it as a plain stream anyway.
+        try (InputStream in = new BufferedInputStream(ServerCefManager.class.getResourceAsStream(resource), 65536);
+             FileOutputStream out = new FileOutputStream(archive)) {
             byte[] buf = new byte[65536];
             int read;
-            while ((read = is.read(buf)) != -1) {
-                os.write(buf, 0, read);
-                done += read;
+            while ((read = in.read(buf)) != -1)
+                out.write(buf, 0, read);
+        }
 
-                long now = System.currentTimeMillis();
-                if (now - lastLog >= 5000) {
-                    lastLog = now;
-                    if (total > have)
-                        Log.info("Downloading java-cef natives: %d/%d MB (%d%%)",
-                                done / (1024 * 1024), total / (1024 * 1024), done * 100 / total);
-                    else
-                        Log.info("Downloading java-cef natives: %d MB", done / (1024 * 1024));
-                }
+        String expectedSha = readBundledText(BUNDLED_NATIVES_ROOT + platform.getNormalizedName() + ".tar.gz.sha256");
+
+        try {
+            if (expectedSha != null) {
+                expectedSha = expectedSha.trim().split("\\s+")[0];
+                String actualSha = sha256Hex(archive);
+                if (!expectedSha.equalsIgnoreCase(actualSha))
+                    throw new IOException("The " + platform.getNormalizedName() + ".tar.gz natives archive is corrupt (expected sha256 "
+                            + expectedSha + ", got " + actualSha + "). Delete " + archive.getAbsolutePath() + " and try again.");
             }
+
+            Log.info("Extracting java-cef natives...");
+            extractTarGz(archive, librariesDir);
+        } finally {
+            archive.delete();
+        }
+
+        Files.write(markerFile.toPath(), commit.getBytes(StandardCharsets.UTF_8));
+        Log.info("java-cef natives installed.");
+    }
+
+    /** Reads a small classpath resource as trimmed UTF-8 text, or null if absent. */
+    private static String readBundledText(String resource) {
+        try (InputStream is = ServerCefManager.class.getResourceAsStream(resource)) {
+            if (is == null)
+                return null;
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8).trim();
+        } catch (IOException e) {
+            return null;
         }
     }
 

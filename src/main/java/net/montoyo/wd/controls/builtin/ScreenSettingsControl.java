@@ -9,6 +9,7 @@ import net.minecraftforge.network.NetworkEvent;
 import net.montoyo.wd.controls.ScreenControl;
 import net.montoyo.wd.core.BrowseMode;
 import net.montoyo.wd.core.MissingPermissionException;
+import net.montoyo.wd.core.ScreenQuality;
 import net.montoyo.wd.core.ScreenRights;
 import net.montoyo.wd.core.ScreenSoundMode;
 import net.montoyo.wd.entity.ScreenBlockEntity;
@@ -18,7 +19,8 @@ import java.util.function.Function;
 
 /**
  * Carries the "extra" screen settings introduced by the server-rendering fork:
- * browse mode (server/local), brightness, volume and sound output mode.
+ * browse mode (server/local), brightness, volume, sound output mode and
+ * stream quality.
  */
 public class ScreenSettingsControl extends ScreenControl {
 	public static final ResourceLocation id = new ResourceLocation("webdisplaystogether:screen_settings");
@@ -27,13 +29,15 @@ public class ScreenSettingsControl extends ScreenControl {
 	private final int brightness;
 	private final int volume;
 	private final ScreenSoundMode soundMode;
+	private final ScreenQuality quality;
 	
-	public ScreenSettingsControl(BrowseMode browseMode, int brightness, int volume, ScreenSoundMode soundMode) {
+	public ScreenSettingsControl(BrowseMode browseMode, int brightness, int volume, ScreenSoundMode soundMode, ScreenQuality quality) {
 		super(id);
 		this.browseMode = browseMode;
 		this.brightness = brightness;
 		this.volume = volume;
 		this.soundMode = soundMode;
+		this.quality = quality;
 	}
 	
 	public ScreenSettingsControl(FriendlyByteBuf buf) {
@@ -42,6 +46,7 @@ public class ScreenSettingsControl extends ScreenControl {
 		brightness = buf.readShort();
 		volume = buf.readShort();
 		soundMode = ScreenSoundMode.of(buf.readByte());
+		quality = ScreenQuality.of(buf.readByte());
 	}
 	
 	@Override
@@ -50,18 +55,19 @@ public class ScreenSettingsControl extends ScreenControl {
 		buf.writeShort(brightness);
 		buf.writeShort(volume);
 		buf.writeByte(soundMode.ordinal());
+		buf.writeByte(quality.ordinal());
 	}
 	
 	@Override
 	public void handleServer(BlockPos pos, BlockSide side, ScreenBlockEntity tes, NetworkEvent.Context ctx, Function<Integer, Boolean> permissionChecker) throws MissingPermissionException {
 		checkPerms(ScreenRights.BIND_DEVICES, permissionChecker, ctx.getSender());
-		tes.setScreenSettings(side, browseMode, clamp(brightness), clamp(volume), soundMode);
+		tes.setScreenSettings(side, browseMode, clamp(brightness), clamp(volume), soundMode, quality);
 	}
 	
 	@Override
 	@OnlyIn(Dist.CLIENT)
 	public void handleClient(BlockPos pos, BlockSide side, ScreenBlockEntity tes, NetworkEvent.Context ctx) {
-		tes.setScreenSettings(side, browseMode, clamp(brightness), clamp(volume), soundMode);
+		tes.setScreenSettings(side, browseMode, clamp(brightness), clamp(volume), soundMode, quality);
 	}
 	
 	private static int clamp(int v) {

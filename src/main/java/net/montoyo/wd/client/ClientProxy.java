@@ -375,18 +375,10 @@ public class ClientProxy extends SharedProxy implements ResourceManagerReloadLis
 	}
 	
 	@Override
-	public void screenUpdateAutoVolumeInGui(Vector3i pos, BlockSide side, boolean av) {
+	public void screenUpdateSettingsInGui(Vector3i pos, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm, net.montoyo.wd.core.ScreenQuality quality) {
 		if (mc.screen != null && mc.screen instanceof GuiScreenConfig gsc) {
 			if (gsc.isForBlock(pos.toBlock(), side))
-				gsc.updateAutoVolume(av);
-		}
-	}
-	
-	@Override
-	public void screenUpdateSettingsInGui(Vector3i pos, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm) {
-		if (mc.screen != null && mc.screen instanceof GuiScreenConfig gsc) {
-			if (gsc.isForBlock(pos.toBlock(), side))
-				gsc.updateSettings(bm, brightness, volume, sm);
+				gsc.updateSettings(bm, brightness, volume, sm, quality);
 		}
 	}
 	

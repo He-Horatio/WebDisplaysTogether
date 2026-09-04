@@ -123,12 +123,22 @@ public final class StreamedScreen {
     // The encoder can be perfectly healthy while the network path to a viewer
     // cannot carry the stream: frames queue up in TCP, arrive in bursts (seen
     // as ~10 fps stutter) and starve the audio behind them (crackling).
-    // Only the client can observe that, so viewers report their delivery
-    // quality every 2s and the stream steps down until the worst viewer's
-    // link keeps up - on any server, without manual tuning.
+    // Only the client can observe that, so viewers report every 2s how fast
+    // the frames of their 8-frame preload buffer actually arrive; when the
+    // transmission speed falls behind the send rate the resolution steps
+    // down, and when it keeps up with room to spare it steps back up -
+    // on any server, without manual tuning.
     private volatile double netScale = 1.0; // written on server thread, read by encoder thread
     private long lastNetBadMs = 0;    // server thread only
     private long lastNetChangeMs = 0; // server thread only
+    /** Arrival slower than send by more than this factor = the link cannot carry the stream. */
+    private static final double SLOW_ARRIVAL_FACTOR = 1.25;
+    /** Arrival within this factor of the send rate = transmission is keeping up. */
+    private static final double FAST_ARRIVAL_FACTOR = 1.10;
+    /** Preload sinking below this many frames means the viewer's cushion is draining. */
+    private static final int LOW_PRELOAD_FRAMES = 4;
+    /** Preload staying at/above this many frames counts as healthy (client target is 8). */
+    private static final int HEALTHY_PRELOAD_FRAMES = 6;
     /** Rolling send cadence, used to ignore video-stall reports for slow/static pages. */
     private volatile double sendIntervalEmaMs = 0;
     private volatile long lastSentWallMs = 0;
@@ -138,8 +148,40 @@ public final class StreamedScreen {
     private long statBytes = 0;
     private double statEncodeMs = 0;
 
+    /**
+     * Per-screen stream quality from the screen configurator. AUTO keeps the
+     * adaptive behavior; a manual tier pins the stream resolution to its
+     * height (the browser itself is never resized) and turns the CPU/network
+     * adaptation off. Written on the server thread, read by the encoder thread.
+     */
+    private volatile net.montoyo.wd.core.ScreenQuality quality = net.montoyo.wd.core.ScreenQuality.AUTO;
+
     // Mouse state (mirrors the old client-side ScreenBlockEntity.handleMouseEvent)
     private final Vector2i lastMousePos = new Vector2i();
+
+    // Click-slop state (server thread only). GuiKeyboard resends the cursor
+    // position every tick, so a click arrives as DOWN / MOVE(s) / UP with the
+    // moves drifting by a few pixels. On large browsers this drift exceeds
+    // Chromium's drag threshold, the link under the cursor starts a drag and
+    // the DOM click never fires ("large screen ignores the mouse" bug). While
+    // the button is down we swallow moves within a small radius and release at
+    // the exact DOWN position; larger movements are forwarded as a real drag.
+    private boolean mouseDown = false;
+    private boolean dragActive = false;
+    private int downX, downY;
+
+    // Multiplayer input fairness (server thread only). There is only one CEF
+    // cursor per screen, so while one player holds a button down (click or
+    // drag), events from other players used to overwrite the DOWN position,
+    // get swallowed by the click-slop or release the wrong button - one
+    // player felt responsive, the other seemingly ignored. The drag now
+    // belongs to whoever pressed DOWN until they release it (or go silent,
+    // see DRAG_OWNER_TIMEOUT_MS); everyone else's mouse is dropped meanwhile.
+    private UUID mouseOwner;
+    private long mouseOwnerLastMs = 0;
+    private int downBtn = 0;
+    /** A drag whose owner sent nothing for this long is force-released. */
+    private static final long DRAG_OWNER_TIMEOUT_MS = 2000;
 
     // Audio (CEF audio thread only, except the volatile format fields)
     private volatile int audioRate = 48000;
@@ -168,6 +210,16 @@ public final class StreamedScreen {
 
     public ServerScreenBrowser getBrowser() {
         return browser;
+    }
+
+    /** Server thread. The encoder picks the new cap up on its next tick. */
+    void setQuality(net.montoyo.wd.core.ScreenQuality q) {
+        if (q == null)
+            q = net.montoyo.wd.core.ScreenQuality.AUTO;
+        if (quality != q) {
+            quality = q;
+            Log.info("Screen %s: stream quality set to %s", key, q);
+        }
     }
 
     /** Creates the CEF browser if possible. Retried from the manager tick until CEF is ready. */
@@ -496,20 +548,39 @@ public final class StreamedScreen {
     }
 
     /**
-     * Delivery report from one viewer (server thread). Multiplicative
-     * decrease on trouble, slow additive-ish recovery after a sustained
-     * clean period - classic AIMD, so the stream settles just below the
-     * bottleneck (network or otherwise) instead of oscillating.
+     * Delivery report from one viewer (server thread). The adaptation is
+     * driven by the transmission speed of the viewer's preload buffer:
+     * frames leave the server every ~sendIntervalEmaMs; if they arrive at the
+     * client noticeably slower than that (or the client's 8-frame preload
+     * visibly drains), the link cannot carry the stream and the resolution
+     * steps down. If they arrive as fast as they are sent and the preload
+     * stays full, the resolution steps back up. Multiplicative decrease,
+     * gentler multiplicative increase - classic AIMD, so the stream settles
+     * just below the bottleneck instead of oscillating.
      */
-    void onClientFeedback(ServerPlayer ply, int framesReceived, int videoStalls, int audioGlitches) {
+    void onClientFeedback(ServerPlayer ply, int framesReceived, int videoStalls, int audioGlitches,
+                          int arrivalIntervalMs, int minBufferedFrames) {
+        // Manual quality tier: the resolution is pinned, there is nothing the
+        // feedback loop could adapt (the client copes with congestion by
+        // growing its preload buffer instead).
+        if (quality.height > 0)
+            return;
+
         long now = System.currentTimeMillis();
 
-        // Stall reports only count while we are actually sending fast video;
-        // a page painting sporadically (e.g. a 5 fps animation) produces
-        // large arrival gaps that are perfectly normal.
-        boolean sendingFastVideo = now - lastSentWallMs < 1500
-                && sendIntervalEmaMs > 0 && sendIntervalEmaMs < 50; // > ~20 fps
-        boolean videoBad = sendingFastVideo && videoStalls >= 3;
+        // Speed comparisons only mean something while we are actually sending
+        // fast video; a page painting sporadically (e.g. a 5 fps animation)
+        // produces large arrival gaps that are perfectly normal.
+        double sendMs = sendIntervalEmaMs;
+        boolean sendingFastVideo = now - lastSentWallMs < 1500 && sendMs > 0 && sendMs < 50; // > ~20 fps
+
+        boolean transferSlow = sendingFastVideo && arrivalIntervalMs > 0
+                && arrivalIntervalMs > sendMs * SLOW_ARRIVAL_FACTOR;
+        boolean preloadDraining = sendingFastVideo && minBufferedFrames >= 0
+                && minBufferedFrames < LOW_PRELOAD_FRAMES;
+        // Stall bursts are transmission trouble the smoothed interval can
+        // hide (frames arriving in clumps at the right average rate).
+        boolean videoBad = transferSlow || preloadDraining || (sendingFastVideo && videoStalls >= 3);
         boolean audioBad = audioGlitches >= 2;
 
         if (videoBad || audioBad) {
@@ -517,15 +588,34 @@ public final class StreamedScreen {
             if (now - lastNetChangeMs >= 4000 && netScale > 0.15) {
                 netScale = Math.max(0.15, netScale * 0.7);
                 lastNetChangeMs = now;
-                Log.info("Screen %s: viewer %s reports starved delivery (frames=%d, stalls=%d, audio glitches=%d); lowering stream quality (net scale %.2f)",
-                        key, ply.getName().getString(), framesReceived, videoStalls, audioGlitches, netScale);
+                Log.info("Screen %s: viewer %s cannot keep the preload filled (arrival %d ms vs send %.0f ms, "
+                                + "min buffered %d, stalls=%d, audio glitches=%d); lowering stream resolution (net scale %.2f)",
+                        key, ply.getName().getString(), arrivalIntervalMs, sendMs, minBufferedFrames,
+                        videoStalls, audioGlitches, netScale);
             }
-        } else if (netScale < 1.0
-                && now - lastNetBadMs >= 20_000
-                && now - lastNetChangeMs >= 10_000) {
+            return;
+        }
+
+        if (netScale >= 1.0)
+            return;
+
+        // Transmission provably fast: frames arrive as quickly as they are
+        // sent and the preload never sank below its target during the report
+        // window - step up promptly. Without speed evidence (static page, no
+        // paced playback) fall back to the slow "clean for a while" probe so
+        // quality still recovers eventually.
+        boolean transferFast = sendingFastVideo && arrivalIntervalMs > 0
+                && arrivalIntervalMs <= sendMs * FAST_ARRIVAL_FACTOR
+                && minBufferedFrames >= HEALTHY_PRELOAD_FRAMES;
+        long cleanMs = transferFast ? 6_000 : 20_000;
+        long stepCooldownMs = transferFast ? 6_000 : 10_000;
+
+        if (now - lastNetBadMs >= cleanMs && now - lastNetChangeMs >= stepCooldownMs) {
             netScale = Math.min(1.0, netScale * 1.15);
             lastNetChangeMs = now;
-            Log.info("Screen %s: delivery clean for 20s; raising stream quality (net scale %.2f)", key, netScale);
+            Log.info("Screen %s: preload transmission keeping up (arrival %d ms vs send %.0f ms, min buffered %d); "
+                            + "raising stream resolution (net scale %.2f)",
+                    key, arrivalIntervalMs, sendMs, minBufferedFrames, netScale);
         }
     }
 
@@ -555,8 +645,9 @@ public final class StreamedScreen {
     /**
      * Injects a mouse event; port of the old client-side
      * ScreenBlockEntity.handleMouseEvent (including its button swap).
+     * The player is used for the drag ownership (see {@link #mouseOwner}).
      */
-    void injectMouse(ClickControl.ControlType event, Vector2i vec, int button) {
+    void injectMouse(ClickControl.ControlType event, Vector2i vec, int button, UUID player) {
         if (button > 1)
             return; // buttons above 1 used to crash the game
 
@@ -568,11 +659,56 @@ public final class StreamedScreen {
         else if (button == 0) button = 1;
 
         final int btn = button;
-        final int lastX = lastMousePos.x;
-        final int lastY = lastMousePos.y;
+        long now = System.currentTimeMillis();
 
         if (event != ClickControl.ControlType.MOVE)
-            lastInputMs = System.currentTimeMillis();
+            lastInputMs = now;
+
+        if (mouseDown) {
+            if (java.util.Objects.equals(player, mouseOwner)) {
+                mouseOwnerLastMs = now;
+            } else if (now - mouseOwnerLastMs < DRAG_OWNER_TIMEOUT_MS) {
+                return; // someone else is mid-drag: drop instead of corrupting it
+            } else {
+                // The owner went silent (disconnected, aimed away): release its
+                // button at the last position so CEF's state stays clean, then
+                // let this event through.
+                final int rx = lastMousePos.x, ry = lastMousePos.y, rbtn = downBtn;
+                ServerCefManager.submit(() -> b.sendMouseRelease(rx, ry, rbtn));
+                mouseDown = false;
+                dragActive = false;
+                mouseOwner = null;
+            }
+        }
+
+        if (event == ClickControl.ControlType.DOWN && vec != null) {
+            mouseDown = true;
+            dragActive = false;
+            downX = vec.x;
+            downY = vec.y;
+            downBtn = btn;
+            mouseOwner = player;
+            mouseOwnerLastMs = now;
+        } else if (event == ClickControl.ControlType.MOVE && mouseDown && !dragActive && vec != null) {
+            int slop = clickSlop();
+            if (Math.abs(vec.x - downX) <= slop && Math.abs(vec.y - downY) <= slop)
+                return; // swallow the jitter; keep the pending click atomic
+            dragActive = true; // real drag: replay it from the DOWN position
+        }
+
+        final int upX, upY;
+        if (event == ClickControl.ControlType.UP && mouseDown && !dragActive) {
+            upX = downX; // perfect click: release exactly where we pressed
+            upY = downY;
+        } else {
+            upX = lastMousePos.x;
+            upY = lastMousePos.y;
+        }
+        if (event == ClickControl.ControlType.UP) {
+            mouseDown = false;
+            dragActive = false;
+            mouseOwner = null;
+        }
 
         ServerCefManager.submit(() -> {
             if (event == ClickControl.ControlType.CLICK) {
@@ -585,7 +721,7 @@ public final class StreamedScreen {
             } else if (event == ClickControl.ControlType.MOVE) {
                 b.sendMouseMove(vec.x, vec.y);
             } else if (event == ClickControl.ControlType.UP) {
-                b.sendMouseRelease(lastX, lastY, btn);
+                b.sendMouseRelease(upX, upY, btn);
             }
 
             b.setFocus(true);
@@ -595,6 +731,15 @@ public final class StreamedScreen {
             lastMousePos.x = vec.x;
             lastMousePos.y = vec.y;
         }
+    }
+
+    /**
+     * Radius (in browser pixels) within which a DOWN/MOVE/UP sequence is still
+     * treated as a click. Scales with the browser resolution because the same
+     * crosshair jitter maps to more pixels on larger screens.
+     */
+    private int clickSlop() {
+        return Math.max(8, Math.max(browserW, browserH) / 64);
     }
 
     /**
@@ -730,16 +875,34 @@ public final class StreamedScreen {
                 // runtime headroom (cpuScale may exceed 1: the cold-start
                 // benchmark is often several times slower than reality) and
                 // by the network feedback scale, always inside the
-                // 360p..720p / bitrate hard bounds. When the network scale
+                // 360p..1080p / bitrate hard bounds. When the network scale
                 // pushes below the 360p floor, the leftover is applied to the
                 // bitrate instead: resolution stops at 360p but the stream
                 // keeps shrinking until the viewer's link can carry it.
-                long hardCap = StreamQuality.hardMaxPixels(fps, codec);
-                long cpuCapPx = Math.min(hardCap, (long) (StreamQuality.maxPixels(fps, codec) * cpuScale));
-                lastCpuCapPixels = cpuCapPx;
-                long desired = (long) (cpuCapPx * netScale);
-                long maxPixels = Math.max(640 * 360, desired);
-                double bitrateScale = desired < maxPixels ? Math.max(0.35, (double) desired / maxPixels) : 1.0;
+                // A manual quality tier from the screen configurator pins the
+                // stream to its height instead and disables the adaptation
+                // (the admin's stream_max_height, when set, still wins).
+                net.montoyo.wd.core.ScreenQuality q = quality;
+                long hardCap;
+                long maxPixels;
+                double bitrateScale;
+                if (q.height > 0) {
+                    long cap = StreamQuality.heightToPixels(q.height);
+                    int cfgH = CommonConfig.Stream.streamMaxHeight;
+                    if (cfgH > 0)
+                        cap = Math.min(cap, StreamQuality.heightToPixels(cfgH));
+                    hardCap = cap;
+                    maxPixels = cap;
+                    bitrateScale = 1.0;
+                    lastCpuCapPixels = cap;
+                } else {
+                    hardCap = StreamQuality.hardMaxPixels(fps, codec);
+                    long cpuCapPx = Math.min(hardCap, (long) (StreamQuality.maxPixels(fps, codec) * cpuScale));
+                    lastCpuCapPixels = cpuCapPx;
+                    long desired = (long) (cpuCapPx * netScale);
+                    maxPixels = Math.max(640 * 360, desired);
+                    bitrateScale = desired < maxPixels ? Math.max(0.35, (double) desired / maxPixels) : 1.0;
+                }
                 lastHardCapPixels = hardCap;
                 long pixels = (long) outW * outH;
                 if (pixels > maxPixels) {
@@ -846,6 +1009,11 @@ public final class StreamedScreen {
     }
 
     private void maybeAdaptResolution(long nowMs) {
+        // Manual quality tier: resolution pinned, no CPU adaptation (avoids
+        // pointless encoder rebuilds too)
+        if (quality.height > 0)
+            return;
+
         // Need a settled average (~2s of frames) and a cooldown between steps
         if (encodeSamples < 60 || nowMs - lastAdaptMs < 10_000)
             return;
@@ -899,6 +1067,10 @@ public final class StreamedScreen {
 
         seq++;
 
+        // Tell the client how fast we are sending (its arrival clock is
+        // distorted by congestion, ours is not).
+        int paceMs = (int) Math.max(0, Math.min(250, Math.round(sendIntervalEmaMs)));
+
         for (int i = 0; i < chunkCount; i++) {
             int off = i * S2CMessageStreamFrame.MAX_CHUNK_SIZE;
             int len = Math.min(S2CMessageStreamFrame.MAX_CHUNK_SIZE, total - off);
@@ -906,7 +1078,7 @@ public final class StreamedScreen {
             System.arraycopy(frame.data, off, chunk, 0, len);
 
             S2CMessageStreamFrame msg = new S2CMessageStreamFrame(
-                    key.pos(), key.side(), streamId, seq, frame.keyframe, codecId, (byte) i, (byte) chunkCount, chunk);
+                    key.pos(), key.side(), streamId, seq, frame.keyframe, codecId, (byte) i, (byte) chunkCount, paceMs, chunk);
 
             for (Subscriber sub : subscribers.values()) {
                 if (sub.local)

@@ -82,18 +82,31 @@ public class ClientScreenStream implements IScreenStream {
     private long fbLastArrivalMs = 0;
     private int fbFrames = 0;
     private int fbStalls = 0;
+    /** Lowest preload buffer level seen while paced in this window; -1 = no paced playback. */
+    private int fbMinBuffered = -1;
 
-    // Presentation pacing (main thread). Frames are shown ~300ms late on
-    // purpose: they wait in this buffer and are handed to the decoder at a
-    // steady cadence, so network jitter is absorbed by the buffer instead of
+    // Presentation pacing (main thread). Frames are preloaded on purpose:
+    // they wait in this buffer and are handed to the decoder at a steady
+    // cadence, so network jitter is absorbed by the buffer instead of
     // showing up as doubled/skipped frames. Frames are buffered ENCODED
     // (~10KB each, vs ~1-4MB decoded) and must be decoded strictly in order
     // (delta frames reference the previous frame), so catch-up decodes faster
-    // rather than dropping.
-    private static final int PREBUFFER_FRAMES = 8;    // ~270ms at 30 fps
+    // rather than dropping. The preload target is 8 frames and the buffer is
+    // hard-capped at 16 frames; how fast the sender can refill this preload
+    // is also what drives the server's dynamic resolution (see pollFeedback).
+    private static final int PREBUFFER_FRAMES = 8;    // preload target (~270ms at 30 fps)
     private static final long MAX_HOLD_MS = 350;      // bound on added latency
-    private static final int MAX_BUFFER_FRAMES = 24;  // ~0.8s: hard catch-up beyond this
+    private static final int MAX_BUFFER_FRAMES = 16;  // hard cap: catch-up beyond this
     private static final long SPARSE_INTERVAL_MS = 80; // slower arrivals = page paints sporadically
+
+    // Adaptive rebuffering: when the link cannot carry the stream (e.g. a
+    // manually pinned high quality tier), a fixed 8-frame cushion drains
+    // over and over - playback stutters constantly. Every underrun doubles
+    // the preload target (bounded below), trading a bit of extra latency for
+    // long smooth stretches with one occasional rebuffering pause instead of
+    // a hitch every few frames. After a stable period the target decays back.
+    private static final int MAX_PREBUFFER_FRAMES = 32; // ~1s at 30 fps
+    private static final long STABLE_DECAY_MS = 30_000; // halve the target after this long without underruns
 
     private record BufferedFrame(byte[] data, int streamId, byte codec, long arrivalMs) {
     }
@@ -103,6 +116,11 @@ public class ClientScreenStream implements IScreenStream {
     private boolean paced = false;
     private long nextDecodeDueMs = 0;
     private long lastSubmitMs = 0;
+    /** Send interval reported by the server (0 = unknown); see S2CMessageStreamFrame.paceMs. */
+    private int serverPaceMs = 0;
+    private int prebufferTarget = PREBUFFER_FRAMES;
+    private long lastUnderrunMs = 0;
+    private long lastTargetDecayMs = 0;
 
     // One-shot diagnostics
     private boolean firstPacketLogged = false;
@@ -140,6 +158,8 @@ public class ClientScreenStream implements IScreenStream {
             frameBuffer.clear();
             paced = false;
         }
+
+        serverPaceMs = msg.paceMs;
 
         byte[] data;
         if (msg.chunkCount <= 1) {
@@ -234,17 +254,40 @@ public class ClientScreenStream implements IScreenStream {
 
         long now = System.currentTimeMillis();
 
+        // Link stable for a while: shrink an enlarged preload back one step
+        // (less latency once the congestion is over).
+        if (prebufferTarget > PREBUFFER_FRAMES
+                && now - Math.max(lastUnderrunMs, lastTargetDecayMs) > STABLE_DECAY_MS) {
+            prebufferTarget = Math.max(PREBUFFER_FRAMES, prebufferTarget / 2);
+            lastTargetDecayMs = now;
+        }
+
         if (frameBuffer.isEmpty()) {
             // Buffer ran dry (true underrun, not just consumed-on-schedule):
             // rebuild the cushion before resuming, otherwise we keep playing
             // at zero margin and every arrival hiccup shows.
-            if (paced && lastSubmitMs != 0 && now - lastSubmitMs > 250)
+            if (paced && lastSubmitMs != 0 && now - lastSubmitMs > 250) {
                 paced = false;
+                fbMinBuffered = 0; // underrun: the preload was drained completely
+                // The cushion was too thin for this link: grow it, so stalls
+                // merge into one longer (but rarer) rebuffering pause instead
+                // of a hitch every few frames.
+                prebufferTarget = Math.min(MAX_PREBUFFER_FRAMES, prebufferTarget * 2);
+                lastUnderrunMs = now;
+            }
             return;
         }
 
         // Sporadic paints: pacing would only add latency to page updates.
-        if (arrivalEmaMs == 0 || arrivalEmaMs > SPARSE_INTERVAL_MS) {
+        // The server's own send cadence is authoritative when known; under
+        // congestion the ARRIVAL interval of a fast stream stretches past the
+        // sparse threshold, and trusting it made playback fall back to
+        // frame-by-frame display - the constant micro-stutter this buffer
+        // exists to avoid.
+        boolean sporadic = serverPaceMs > 0
+                ? serverPaceMs > SPARSE_INTERVAL_MS
+                : (arrivalEmaMs == 0 || arrivalEmaMs > SPARSE_INTERVAL_MS);
+        if (sporadic) {
             while (!frameBuffer.isEmpty())
                 if (!submitFrame(frameBuffer.removeFirst(), now))
                     return;
@@ -252,15 +295,26 @@ public class ClientScreenStream implements IScreenStream {
             return;
         }
 
+        // Present at the sender's cadence, not the (congestion-distorted)
+        // arrival cadence, so playback does not speed up into the next underrun.
+        long period = serverPaceMs > 0
+                ? Math.max(15, Math.min(67, serverPaceMs))
+                : Math.max(15, Math.min(67, Math.round(arrivalEmaMs)));
+
         if (!paced) {
             BufferedFrame oldest = frameBuffer.peekFirst();
-            if (frameBuffer.size() < PREBUFFER_FRAMES && now - oldest.arrivalMs() < MAX_HOLD_MS)
+            long holdMs = Math.max(MAX_HOLD_MS, prebufferTarget * period);
+            if (frameBuffer.size() < prebufferTarget && now - oldest.arrivalMs() < holdMs)
                 return; // still building the jitter cushion
             paced = true;
             nextDecodeDueMs = now;
         }
 
-        long period = Math.max(15, Math.min(67, Math.round(arrivalEmaMs)));
+        // Preload health for the delivery feedback: how far the buffer sank
+        // below the 8-frame target tells the server whether its send rate is
+        // being carried by the link.
+        if (fbMinBuffered < 0 || frameBuffer.size() < fbMinBuffered)
+            fbMinBuffered = frameBuffer.size();
 
         if (now >= nextDecodeDueMs) {
             if (!submitFrame(frameBuffer.removeFirst(), now))
@@ -273,7 +327,8 @@ public class ClientScreenStream implements IScreenStream {
         // Way too much buffered (long stall then a burst): decode the excess
         // immediately. Frames cannot be dropped (delta frames reference their
         // predecessor), but decoding is cheap - the picture just jumps ahead.
-        while (frameBuffer.size() > MAX_BUFFER_FRAMES)
+        int maxBuffer = Math.max(MAX_BUFFER_FRAMES, prebufferTarget * 2);
+        while (frameBuffer.size() > maxBuffer)
             if (!submitFrame(frameBuffer.removeFirst(), now))
                 return;
     }
@@ -362,13 +417,18 @@ public class ClientScreenStream implements IScreenStream {
     }
 
     /**
-     * Returns {completeFramesReceived, stallGaps} since the last poll and
-     * resets the window. Main thread only.
+     * Returns {completeFramesReceived, stallGaps, arrivalIntervalMs,
+     * minBufferedFrames} since the last poll and resets the window.
+     * arrivalIntervalMs is the smoothed gap between complete frame arrivals
+     * (0 = unknown); minBufferedFrames is the lowest preload level seen while
+     * paced (-1 = no paced playback this window). Main thread only.
      */
     int[] pollFeedback() {
-        int[] out = {fbFrames, fbStalls};
+        int arrival = (int) Math.round(arrivalEmaMs);
+        int[] out = {fbFrames, fbStalls, arrival, fbMinBuffered};
         fbFrames = 0;
         fbStalls = 0;
+        fbMinBuffered = -1;
         return out;
     }
 

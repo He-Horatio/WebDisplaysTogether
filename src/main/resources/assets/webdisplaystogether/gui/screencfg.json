@@ -206,28 +206,40 @@
       "type": "Label",
       "x": 258,
       "y": 87,
+      "label": "$webdisplaystogether.gui.screencfg.quality"
+    },
+    {
+      "type": "ComboBox",
+      "name": "cbQuality",
+      "x": 257,
+      "y": 99,
+      "width": 88,
+      "height": 14,
+      "options": [
+        "$webdisplaystogether.gui.screencfg.quality.auto",
+        "$webdisplaystogether.gui.screencfg.quality.fluent",
+        "$webdisplaystogether.gui.screencfg.quality.sd",
+        "$webdisplaystogether.gui.screencfg.quality.hd"
+      ]
+    },
+    {
+      "type": "Label",
+      "x": 258,
+      "y": 117,
       "label": "$webdisplaystogether.gui.screencfg.rotation"
     },
     {
       "type": "Button",
       "name": "btnChangeRot",
       "x": 260,
-      "y": 99,
+      "y": 129,
       "width": 84
-    },
-    {
-      "type": "CheckBox",
-      "name": "cbAutoVolume",
-      "x": 257,
-      "y": 120,
-      "label": "$webdisplaystogether.gui.screencfg.autovol",
-      "tooltip": "$webdisplaystogether.gui.screencfg.avwarning"
     },
     {
       "type": "Slider",
       "name": "sldBrightness",
       "x": 257,
-      "y": 138,
+      "y": 152,
       "width": 88,
       "height": 14,
       "min": 0,
@@ -240,7 +252,7 @@
       "type": "Slider",
       "name": "sldVolume",
       "x": 257,
-      "y": 156,
+      "y": 170,
       "width": 88,
       "height": 14,
       "min": 0,
@@ -252,14 +264,14 @@
     {
       "type": "Label",
       "x": 258,
-      "y": 176,
+      "y": 190,
       "label": "$webdisplaystogether.gui.screencfg.soundmode"
     },
     {
       "type": "ComboBox",
       "name": "cbSoundMode",
       "x": 257,
-      "y": 188,
+      "y": 202,
       "width": 88,
       "height": 14,
       "options": [

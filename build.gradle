@@ -57,6 +57,10 @@ minecraft {
             workingDirectory project.file('run')
             arg "-mixin.config=webdisplaystogether.mixins.json"
 
+            // e.g. gradlew runServer -PcefSelfTest to validate the CEF pipeline
+            if (project.hasProperty('cefSelfTest')) {
+                jvmArg '-Dwdt.cefSelfTest=true'
+            }
 
             property 'forge.logging.console.level', 'debug'
 
@@ -138,6 +142,13 @@ dependencies {
     }
 }
 
+// Mod hosting sites reject jars containing executables (even inside nested
+// archives), so the java-cef natives are not bundled in release jars;
+// ServerCefManager downloads them from MCEF's CDN on first run instead.
+tasks.named('processResources') {
+    exclude 'wd_natives/*.tar.gz'
+}
+
 // merge the bytedeco jars (classes + natives) into the final mod jar
 tasks.named('jar') {
     from(provider { configurations.shadeFfmpeg.collect { it.isDirectory() ? it : zipTree(it) } }) {
@@ -157,6 +168,14 @@ tasks.named('jar') {
         exclude 'org/bytedeco/ffmpeg/**/postproc*', 'org/bytedeco/ffmpeg/**/libpostproc*', 'org/bytedeco/ffmpeg/**/jnipostproc*', 'org/bytedeco/ffmpeg/**/libjnipostproc*'
         exclude 'org/bytedeco/ffmpeg/**/ffmpeg', 'org/bytedeco/ffmpeg/**/ffmpeg.exe', 'org/bytedeco/ffmpeg/**/ffprobe', 'org/bytedeco/ffmpeg/**/ffprobe.exe'
     }
+
+    // FFmpeg is LGPL v2.1+, so its license text has to ship alongside the
+    // binaries merged in above. NOTICE also covers JavaCPP, jQuery and the
+    // components that are only downloaded at runtime.
+    from(file('LICENSE')) { into 'META-INF' }
+    from(file('NOTICE')) { into 'META-INF' }
+    from(file('licenses')) { into 'META-INF/licenses' }
+
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 

@@ -131,9 +131,9 @@ public class C2SMessageScreenCtrl extends Packet {
 		return ret;
 	}
 	
-	public static C2SMessageScreenCtrl settings(ScreenBlockEntity tes, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm) {
+	public static C2SMessageScreenCtrl settings(ScreenBlockEntity tes, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm, net.montoyo.wd.core.ScreenQuality quality) {
 		C2SMessageScreenCtrl ret = base(tes, side);
-		ret.control = new ScreenSettingsControl(bm, brightness, volume, sm);
+		ret.control = new ScreenSettingsControl(bm, brightness, volume, sm, quality);
 		return ret;
 	}
 	

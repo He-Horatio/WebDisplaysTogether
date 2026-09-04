@@ -117,7 +117,7 @@ public class ScreenBlock extends BaseEntityBlock {
                 float hitZ = ((float) hit.getLocation().z) - (float) te.getBlockPos().getZ();
 
                 if (hit2pixels(side, hit.getBlockPos(), new Vector3i(hit.getBlockPos()), scr, hitX, hitY, hitZ, tmp))
-                    te.click(side, tmp);
+                    te.click(side, tmp, player);
                 return InteractionResult.CONSUME;
             }
         }
@@ -268,6 +268,9 @@ public class ScreenBlock extends BaseEntityBlock {
             state, @org.jetbrains.annotations.Nullable LivingEntity whoDidThisShit, @NotNull ItemStack stack) {
         if (world.isClientSide)
             return;
+
+        if (whoDidThisShit instanceof Player)
+            net.montoyo.wd.serverbrowser.ServerCefManager.remindOperatorAboutSetup((Player) whoDidThisShit);
 
         Multiblock.BlockOverride override = new Multiblock.BlockOverride(new Vector3i(pos), Multiblock.OverrideAction.IGNORE);
         Vector3i[] neighbors = new Vector3i[6];

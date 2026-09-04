@@ -30,7 +30,9 @@ public class ItemScreenConfigurator extends Item implements WDItem {
 
     @Override
     public InteractionResult useOn(UseOnContext context) {
-        if (context.getPlayer().isShiftKeyDown() || !(context.getLevel().getBlockState(context.getClickedPos()).getBlock() instanceof ScreenBlock))
+        //Sneaking is intentionally allowed: with an item in hand vanilla skips the
+        //block's use() while sneaking, so the configurator GUI can still open.
+        if (!(context.getLevel().getBlockState(context.getClickedPos()).getBlock() instanceof ScreenBlock))
             return InteractionResult.PASS;
 
         if (context.getLevel().isClientSide)

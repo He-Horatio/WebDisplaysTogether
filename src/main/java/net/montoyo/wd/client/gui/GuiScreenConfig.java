@@ -15,6 +15,7 @@ import net.montoyo.wd.WebDisplays;
 import net.montoyo.wd.client.gui.controls.*;
 import net.montoyo.wd.client.gui.loading.FillControl;
 import net.montoyo.wd.core.BrowseMode;
+import net.montoyo.wd.core.ScreenQuality;
 import net.montoyo.wd.core.ScreenRights;
 import net.montoyo.wd.core.ScreenSoundMode;
 import net.montoyo.wd.entity.ScreenData;
@@ -118,7 +119,7 @@ public class GuiScreenConfig extends WDScreen {
     private CheckBox cbLockRatio;
 
     @FillControl
-    private CheckBox cbAutoVolume;
+    private ComboBox cbQuality;
 
     @FillControl
     private ComboBox cbBrowseMode;
@@ -176,7 +177,7 @@ public class GuiScreenConfig extends WDScreen {
             tfResY.setText("" + scr.resolution.y);
             aspectRatio = ((float) scr.resolution.x) / ((float) scr.resolution.y);
 
-            cbAutoVolume.setChecked(scr.autoVolume);
+            cbQuality.setSelectedIndex(scr.quality.ordinal());
             cbBrowseMode.setSelectedIndex(scr.browseMode.ordinal());
             sldBrightness.setValue(scr.brightness);
             sldVolume.setValue(scr.volume);
@@ -252,7 +253,8 @@ public class GuiScreenConfig extends WDScreen {
         WDNetworkRegistry.INSTANCE.sendToServer(C2SMessageScreenCtrl.settings(tes, side,
                 BrowseMode.of(cbBrowseMode.getSelectedIndex()),
                 sldBrightness.getValue(), sldVolume.getValue(),
-                ScreenSoundMode.of(cbSoundMode.getSelectedIndex())));
+                ScreenSoundMode.of(cbSoundMode.getSelectedIndex()),
+                ScreenQuality.of(cbQuality.getSelectedIndex())));
     }
 
     @GuiSubscribe
@@ -263,7 +265,7 @@ public class GuiScreenConfig extends WDScreen {
 
     @GuiSubscribe
     public void onComboChanged(ComboBox.SelectionChangedEvent ev) {
-        if(ev.getSource() == cbSoundMode)
+        if(ev.getSource() == cbSoundMode || ev.getSource() == cbQuality)
             sendSettings();
         //cbBrowseMode is only applied when the confirm button is pressed
     }
@@ -357,7 +359,7 @@ public class GuiScreenConfig extends WDScreen {
             } catch(NumberFormatException ex) {
                 cbLockRatio.setChecked(false);
             }
-        } else if(ev.getSource() == cbAutoVolume) WDNetworkRegistry.INSTANCE.sendToServer(C2SMessageScreenCtrl.autoVol(tes, side, ev.isChecked()));
+        }
     }
 
     public boolean isFriendCheckbox(CheckBox cb) {
@@ -515,7 +517,7 @@ public class GuiScreenConfig extends WDScreen {
             btnSetRes.setDisabled(true);
 
         flag = (myRights & ScreenRights.BIND_DEVICES) == 0;
-        cbAutoVolume.setDisabled(flag);
+        cbQuality.setDisabled(flag);
         cbBrowseMode.setDisabled(flag);
         btnApplyMode.setDisabled(flag);
         sldBrightness.setDisabled(flag);
@@ -535,16 +537,13 @@ public class GuiScreenConfig extends WDScreen {
         updateRotationStr();
     }
 
-    public void updateAutoVolume(boolean av) {
-        cbAutoVolume.setChecked(av);
-    }
-
-    public void updateSettings(BrowseMode bm, int brightness, int volume, ScreenSoundMode sm) {
+    public void updateSettings(BrowseMode bm, int brightness, int volume, ScreenSoundMode sm, ScreenQuality quality) {
         if(settingsSyncTicks < 0) { //Don't fight local edits in progress
             cbBrowseMode.setSelectedIndex(bm.ordinal());
             sldBrightness.setValue(brightness);
             sldVolume.setValue(volume);
             cbSoundMode.setSelectedIndex(sm.ordinal());
+            cbQuality.setSelectedIndex(quality.ordinal());
         }
     }
 

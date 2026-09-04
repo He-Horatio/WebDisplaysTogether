@@ -1,0 +1,131 @@
+WebDisplaysTogether
+Copyright (c) 2024-2026 Horatio
+
+This product includes software developed by third parties. The full license
+texts for the redistributed components are in META-INF/licenses/ inside the
+mod jar (and in the licenses/ directory of the source repository).
+
+================================================================================
+1. WebDisplays -- upstream project (PUBLIC DOMAIN)
+================================================================================
+    Author:  montoyo (BARBOTIN Nicolas)
+    Source:  https://github.com/montoyo/webdisplays
+    License: Public domain, as declared by the author.
+
+    WebDisplaysTogether is a fork/port of WebDisplays. The screen, peripheral,
+    GUI, control and miniserv subsystems descend from that work. The original
+    author asked only to be credited, and is credited in the mod metadata,
+    the README and the distribution pages.
+
+================================================================================
+2. FFmpeg -- REDISTRIBUTED IN THE MOD JAR (LGPL v2.1 or later)
+================================================================================
+    Project: https://ffmpeg.org/
+    Build:   org.bytedeco:ffmpeg:6.0-1.5.9 (JavaCPP Presets, default build)
+    License: GNU Lesser General Public License, version 2.1 or later
+    Text:    META-INF/licenses/ffmpeg-COPYING.LGPLv2.1.txt
+
+    The mod jar contains prebuilt FFmpeg shared libraries for windows-x86_64
+    and linux-x86_64:
+
+        avcodec, avutil, swresample, swscale
+        (plus the matching JavaCPP JNI bridge libraries)
+
+    They are used for VP8/VP9 video and Opus audio encoding and decoding.
+
+    IMPORTANT: this is the DEFAULT (non-GPL) JavaCPP Presets FFmpeg build.
+    It is configured WITHOUT --enable-gpl, so no GPL-only FFmpeg component
+    (such as libx264 or libx265) is present, and the LGPL v2.1+ terms apply.
+
+    The libraries are used as unmodified dynamically loaded shared libraries.
+    In accordance with LGPL v2.1 section 6, the corresponding source code and
+    the build scripts are available from:
+
+        https://github.com/bytedeco/javacpp-presets/tree/master/ffmpeg
+        https://ffmpeg.org/download.html
+
+    Because the libraries are loaded dynamically at runtime, a user may
+    replace them with a modified version of FFmpeg by substituting the
+    extracted native libraries in the JavaCPP cache directory
+    (<gamedir>/wd_javacpp_cache/).
+
+================================================================================
+3. JavaCPP -- REDISTRIBUTED IN THE MOD JAR (Apache License 2.0)
+================================================================================
+    Project: https://github.com/bytedeco/javacpp
+    Build:   org.bytedeco:javacpp:1.5.9
+    License: Apache License, Version 2.0
+    Text:    META-INF/licenses/javacpp-LICENSE-Apache-2.0.txt
+
+    Provides the Java <-> native bridge used to call FFmpeg. The mod jar
+    contains its JNI libraries for windows-x86_64 and linux-x86_64.
+
+    The Windows build of JavaCPP additionally ships the Microsoft Visual C++
+    runtime redistributable libraries that its native code links against
+    (msvcp140, vcruntime140, ucrtbase, concrt140, vcomp140 and the
+    api-ms-win-* CRT forwarders). These are redistributed under the Microsoft
+    Visual Studio redistributable terms and originate from the upstream
+    org.bytedeco:javacpp:windows-x86_64 artifact.
+
+================================================================================
+4. MCEF -- REQUIRED DEPENDENCY, NOT REDISTRIBUTED (LGPL)
+================================================================================
+    Project: https://github.com/CinemaMod/mcef
+    License: GNU Lesser General Public License
+    Vendor:  CinemaMod Group
+
+    MCEF is NOT bundled in this jar. It is a separate mod that the user
+    installs alongside this one, and it is declared as a required dependency
+    in the mod metadata.
+
+    MCEF's own documentation states: "MCEF is LGPL, as long as your project
+    doesn't modify or include MCEF source code, you can choose a different
+    license." This project only calls MCEF's public API and neither modifies
+    nor includes its source.
+
+================================================================================
+5. Chromium Embedded Framework / java-cef -- NOT SHIPPED, NOT DOWNLOADED
+================================================================================
+    Projects: https://bitbucket.org/chromiumembedded/cef
+              https://bitbucket.org/chromiumembedded/java-cef
+    Licenses: BSD 3-Clause (CEF, java-cef); Chromium is under a mix of BSD
+              and other permissive licenses.
+
+    The Chromium/java-cef native binaries are NOT contained in this jar, and
+    this mod never fetches them: it contains no networking code of its own.
+
+    On a client, MCEF manages these binaries itself.
+
+    A dedicated server has no MCEF client to do that, so its owner installs
+    them by hand into mods/mcef-libraries, once. The exact archive URL, its
+    published SHA-256 and the target directory are printed to the server
+    console and written into webdisplaystogether-setup.txt. Until they are in
+    place the server runs normally and only screens stay disabled.
+
+================================================================================
+6. jQuery -- REDISTRIBUTED IN THE MOD JAR (MIT License)
+================================================================================
+    Project: https://jquery.com/
+    File:    assets/webdisplaystogether/html/jquery.js
+    License: MIT License
+    Copyright (c) OpenJS Foundation and other contributors
+
+    Used by the mod's built-in start page (mod://webdisplaystogether/main.html).
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.

@@ -410,7 +410,7 @@ public class ScreenBlockEntity extends BlockEntity {
             scr.laserUser = null;
     }
 
-    public void click(BlockSide side, Vector2i vec) {
+    public void click(BlockSide side, Vector2i vec, @Nullable Player ply) {
         ScreenData scr = getScreen(side);
         if (scr == null) {
             Log.error("Attempt click non-existing screen of side %s", side.toString());
@@ -423,7 +423,7 @@ public class ScreenBlockEntity extends BlockEntity {
             if (scr.browseMode == net.montoyo.wd.core.BrowseMode.LOCAL)
                 WDNetworkRegistry.INSTANCE.send(PacketDistributor.NEAR.with(() -> point(level, getBlockPos())), S2CMessageScreenUpdate.click(this, side, ClickControl.ControlType.CLICK, vec, 1));
             else
-                ServerBrowserManager.injectMouse(level, getBlockPos(), side, ClickControl.ControlType.CLICK, vec, 1);
+                ServerBrowserManager.injectMouse(level, getBlockPos(), side, ClickControl.ControlType.CLICK, vec, 1, ply != null ? ply.getUUID() : null);
         }
     }
 
@@ -447,6 +447,21 @@ public class ScreenBlockEntity extends BlockEntity {
         if (button == 1) button = 0;
         else if (button == 0) button = 1;
 
+        // Click-slop: swallow the small cursor jitter between DOWN and UP so
+        // Chromium sees an atomic click instead of a link drag. Mirrors the
+        // server-side logic in StreamedScreen.injectMouse (large-screen fix).
+        if (event == ClickControl.ControlType.DOWN && vec != null) {
+            scr.clickMouseDown = true;
+            scr.clickDragActive = false;
+            scr.clickDownX = vec.x;
+            scr.clickDownY = vec.y;
+        } else if (event == ClickControl.ControlType.MOVE && scr.clickMouseDown && !scr.clickDragActive && vec != null) {
+            int slop = Math.max(8, Math.max(scr.resolution.x, scr.resolution.y) / 64);
+            if (Math.abs(vec.x - scr.clickDownX) <= slop && Math.abs(vec.y - scr.clickDownY) <= slop)
+                return; // keep the pending click atomic
+            scr.clickDragActive = true;
+        }
+
         if (event == ClickControl.ControlType.CLICK) {
             mcefBrowser.sendMouseMove(vec.x, vec.y);
             mcefBrowser.sendMousePress(vec.x, vec.y, button);
@@ -456,8 +471,14 @@ public class ScreenBlockEntity extends BlockEntity {
             mcefBrowser.sendMousePress(vec.x, vec.y, button);
         } else if (event == ClickControl.ControlType.MOVE)
             mcefBrowser.sendMouseMove(vec.x, vec.y);
-        else if (event == ClickControl.ControlType.UP)
-            mcefBrowser.sendMouseRelease(scr.lastMousePos.x, scr.lastMousePos.y, button);
+        else if (event == ClickControl.ControlType.UP) {
+            if (scr.clickMouseDown && !scr.clickDragActive)
+                mcefBrowser.sendMouseRelease(scr.clickDownX, scr.clickDownY, button);
+            else
+                mcefBrowser.sendMouseRelease(scr.lastMousePos.x, scr.lastMousePos.y, button);
+            scr.clickMouseDown = false;
+            scr.clickDragActive = false;
+        }
 
         mcefBrowser.setFocus(true);
 
@@ -854,7 +875,7 @@ public class ScreenBlockEntity extends BlockEntity {
             if (scr.browseMode == net.montoyo.wd.core.BrowseMode.LOCAL)
                 WDNetworkRegistry.INSTANCE.send(PacketDistributor.NEAR.with(() -> point(level, getBlockPos())), S2CMessageScreenUpdate.click(this, side, event, pos, button == -1 ? -1 : button));
             else
-                ServerBrowserManager.injectMouse(level, getBlockPos(), side, event, pos, button);
+                ServerBrowserManager.injectMouse(level, getBlockPos(), side, event, pos, button, ply != null ? ply.getUUID() : null);
         }
     }
 
@@ -869,7 +890,7 @@ public class ScreenBlockEntity extends BlockEntity {
             if (scr.browseMode == net.montoyo.wd.core.BrowseMode.LOCAL)
                 WDNetworkRegistry.INSTANCE.send(PacketDistributor.NEAR.with(() -> point(level, getBlockPos())), S2CMessageScreenUpdate.click(this, side, ClickControl.ControlType.UP, null, button));
             else
-                ServerBrowserManager.injectMouse(level, getBlockPos(), side, ClickControl.ControlType.UP, null, button);
+                ServerBrowserManager.injectMouse(level, getBlockPos(), side, ClickControl.ControlType.UP, null, button, ply != null ? ply.getUUID() : null);
         }
     }
 
@@ -978,7 +999,7 @@ public class ScreenBlockEntity extends BlockEntity {
         }
     }
 
-    public void setScreenSettings(BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm) {
+    public void setScreenSettings(BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm, net.montoyo.wd.core.ScreenQuality quality) {
         ScreenData scr = getScreen(side);
         if (scr == null) {
             Log.error("Trying to change settings of invalid screen (side %s)", side.toString());
@@ -986,10 +1007,12 @@ public class ScreenBlockEntity extends BlockEntity {
         }
 
         boolean modeChanged = scr.browseMode != bm;
+        boolean qualityChanged = scr.quality != quality;
         scr.browseMode = bm;
         scr.brightness = brightness;
         scr.volume = volume;
         scr.soundMode = sm;
+        scr.quality = quality;
 
         if (level.isClientSide) {
             if (modeChanged) {
@@ -997,12 +1020,15 @@ public class ScreenBlockEntity extends BlockEntity {
                 scr.closeStream();
             }
 
-            WebDisplays.PROXY.screenUpdateSettingsInGui(new Vector3i(getBlockPos()), side, bm, brightness, volume, sm);
+            WebDisplays.PROXY.screenUpdateSettingsInGui(new Vector3i(getBlockPos()), side, bm, brightness, volume, sm, quality);
         } else {
             if (modeChanged && bm == net.montoyo.wd.core.BrowseMode.LOCAL)
                 ServerBrowserManager.onScreenRemoved(level, getBlockPos(), side);
 
-            WDNetworkRegistry.INSTANCE.send(PacketDistributor.NEAR.with(() -> point(level, getBlockPos())), S2CMessageScreenUpdate.settings(this, side, bm, brightness, volume, sm));
+            if (qualityChanged)
+                ServerBrowserManager.onQualityChanged(level, getBlockPos(), side, quality);
+
+            WDNetworkRegistry.INSTANCE.send(PacketDistributor.NEAR.with(() -> point(level, getBlockPos())), S2CMessageScreenUpdate.settings(this, side, bm, brightness, volume, sm, quality));
             setChanged();
         }
     }

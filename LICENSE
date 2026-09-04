@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2023 CinemaMod Group
+Copyright (c) 2024-2026 Horatio (WebDisplaysTogether)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,23 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------
+
+The MIT license above covers the modifications and additions made by the
+WebDisplaysTogether project.
+
+This project is derived from WebDisplays by montoyo (BARBOTIN Nicolas),
+which its author has released into the PUBLIC DOMAIN:
+
+    "This mod and its source code is now in public domain. Feel free to do
+     whatever you want with it; make forks, distribute it... whatever
+     I would appreciate it, of course, if you credited me. Thank you!"
+    -- https://github.com/montoyo/webdisplays/blob/master/LICENSE
+
+Files carrying a "Copyright (C) 2018/2019 BARBOTIN Nicolas" header originate
+from that public-domain work. Credit to montoyo is given in the mod metadata,
+in the README and on the distribution pages, as requested by the author.
+
+For third-party components redistributed inside the built mod jar, see the
+NOTICE file next to this one.

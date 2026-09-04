@@ -84,7 +84,7 @@ public class SharedProxy {
     public void screenUpdateAutoVolumeInGui(Vector3i pos, BlockSide side, boolean av) {
     }
 
-    public void screenUpdateSettingsInGui(Vector3i pos, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm) {
+    public void screenUpdateSettingsInGui(Vector3i pos, BlockSide side, net.montoyo.wd.core.BrowseMode bm, int brightness, int volume, net.montoyo.wd.core.ScreenSoundMode sm, net.montoyo.wd.core.ScreenQuality quality) {
     }
 
     public void displaySetPadURLGui(ItemStack is, String padURL) {

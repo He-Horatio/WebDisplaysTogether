@@ -21,3 +21,13 @@ build
 eclipse
 run
 /_OLD
+
+# local scratch that ends up next to the project
+/build_log*.txt
+/smoketest
+/tmp_mf
+/META-INF
+/_stream_rework_backup
+/stop_and_deploy.sh
+/webdisplays.refmap.json
+/*.jar
